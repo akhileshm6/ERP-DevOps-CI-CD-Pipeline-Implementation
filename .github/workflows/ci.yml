@@ -9,7 +9,6 @@ on:
 jobs:
   backend-test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -23,6 +22,11 @@ jobs:
         run: |
           cd server
           npm ci
+
+      - name: Run Security Audit
+        run: |
+          cd server
+          npm run audit
 
       - name: Run Backend Unit Tests
         run: |

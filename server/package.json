@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "jest --detectOpenHandles"
+    "test": "jest --detectOpenHandles",
+    "audit": "npm audit --audit-level=high || true"
   },
   "keywords": [],
   "author": "",
