@@ -47,7 +47,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: notyouravgcoder
+          username: ${{ secrets.DOCKERHUB_NOTYOURAVGCODER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and Push Backend Image
