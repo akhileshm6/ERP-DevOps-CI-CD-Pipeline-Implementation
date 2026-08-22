@@ -47,7 +47,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_NOTYOURAVGCODER }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and Push Backend Image
@@ -55,11 +55,11 @@ jobs:
         with:
           context: ./server
           push: true
-          tags: notyouravgcoder/erp-backend:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/erp-backend:latest
 
       - name: Build and Push Frontend Image
         uses: docker/build-push-action@v5
         with:
           context: ./client
           push: true
-          tags: notyouravgcoder/erp-frontend:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/erp-frontend:latest
