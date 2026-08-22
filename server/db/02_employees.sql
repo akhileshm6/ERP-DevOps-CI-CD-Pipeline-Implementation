@@ -1,0 +1,13 @@
+CREATE TABLE IF NOT EXISTS departments (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS employees (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    department_id INT REFERENCES departments(id) ON DELETE SET NULL,
+    job_title VARCHAR(100) NOT NULL,
+    salary DECIMAL(10, 2) NOT NULL,
+    hire_date DATE DEFAULT CURRENT_DATE
+);
