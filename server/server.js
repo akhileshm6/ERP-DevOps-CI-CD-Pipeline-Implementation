@@ -1,10 +1,4 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const { authenticateToken, authorizeRoles } = require('./middleware/auth');
-const employeeRoutes = require('./routes/employees');
-const inventoryRoutes = require('./routes/inventory');
-
 const app = express();
 const PORT = process.env.PORT || 5000;
 
