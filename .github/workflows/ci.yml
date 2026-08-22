@@ -33,7 +33,7 @@ jobs:
           cd server
           npm test
 
-  publish-images:
+  publish-and-deploy:
     needs: quality-and-test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -63,3 +63,9 @@ jobs:
           context: ./client
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/erp-frontend:latest
+
+      - name: Trigger Backend Cloud Deployment
+        run: curl -X POST ${{ secrets.RENDER_BACKEND_HOOK }}
+
+      - name: Trigger Frontend Cloud Deployment
+        run: curl -X POST ${{ secrets.RENDER_FRONTEND_HOOK }}

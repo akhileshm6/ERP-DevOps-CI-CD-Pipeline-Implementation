@@ -1,5 +1,6 @@
 const express = require('express');
 const app = express();
+
 const PORT = process.env.PORT || 5000;
 
 app.use(express.json());
@@ -25,6 +26,11 @@ app.get('/ready', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+// Only listen when executed directly (allows supertest in Jest)
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+
+module.exports = app;
