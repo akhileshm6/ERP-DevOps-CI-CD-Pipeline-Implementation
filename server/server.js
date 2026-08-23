@@ -7,6 +7,7 @@ const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 const employeeRoutes = require('./routes/employees');
 const inventoryRoutes = require('./routes/inventory');
 const invoiceRoutes = require('./routes/invoices');
+const reportRoutes = require('./routes/reports');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -81,10 +82,11 @@ app.get('/api/admin/dashboard', authenticateToken, authorizeRoles('Admin', 'Mana
     res.status(200).json({ message: 'Access granted to admin portal', user: req.user });
 });
 
-// --- Module Routes (Weeks 8 - 10) ---
+// --- Module Routes (Weeks 8 - 11) ---
 app.use('/api/employees', employeeRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/invoices', invoiceRoutes);
+app.use('/api/reports', reportRoutes);
 
 // Only listen when executed directly (allows supertest in Jest)
 if (require.main === module) {
