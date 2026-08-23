@@ -8,6 +8,7 @@ const employeeRoutes = require('./routes/employees');
 const inventoryRoutes = require('./routes/inventory');
 const invoiceRoutes = require('./routes/invoices');
 const reportRoutes = require('./routes/reports');
+const metricsRoutes = require('./routes/metrics');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -35,21 +36,21 @@ app.get('/ready', async (req, res) => {
 });
 
 // Mock user storage
-const users = [];
+const registeredUsers = [];
 
 // --- Auth Routes (Week 7) ---
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { name, email, password, role } = req.body;
 
-        const existingUser = users.find(u => u.email === email);
+        const existingUser = registeredUsers.find(u => u.email === email);
         if (existingUser) {
             return res.status(400).json({ error: 'User already exists' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = { id: users.length + 1, name, email, password: hashedPassword, role: role || 'Employee' };
-        users.push(newUser);
+        const newUser = { id: registeredUsers.length + 1, name, email, password: hashedPassword, role: role || 'Employee' };
+        registeredUsers.push(newUser);
 
         res.status(201).json({ message: 'User registered successfully', userId: newUser.id });
     } catch (err) {
@@ -60,7 +61,7 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = users.find(u => u.email === email);
+        const user = registeredUsers.find(u => u.email === email);
 
         if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(401).json({ error: 'Invalid email or password' });
@@ -82,11 +83,12 @@ app.get('/api/admin/dashboard', authenticateToken, authorizeRoles('Admin', 'Mana
     res.status(200).json({ message: 'Access granted to admin portal', user: req.user });
 });
 
-// --- Module Routes (Weeks 8 - 11) ---
+// --- Module Routes (Weeks 8 - 12) ---
 app.use('/api/employees', employeeRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/metrics', metricsRoutes);
 
 // Only listen when executed directly (allows supertest in Jest)
 if (require.main === module) {
