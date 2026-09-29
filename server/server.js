@@ -10,6 +10,7 @@ const inventoryRoutes = require('./routes/inventory');
 const invoiceRoutes = require('./routes/invoices');
 const reportRoutes = require('./routes/reports');
 const metricsRoutes = require('./routes/metrics');
+const flagRoutes = require('./routes/flags');   // Vivek — Phase 6
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -91,6 +92,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/metrics', metricsRoutes);
+app.use('/api/flags', flagRoutes);   // Vivek — Phase 6 (GET /api/flags/evaluate)
 
 // Only listen when executed directly (allows supertest in Jest)
 if (require.main === module) {
