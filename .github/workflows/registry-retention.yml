@@ -1,0 +1,62 @@
+# Container registry retention.
+# Owner: Vivek Anand (Containerisation & System Architecture) — Week 7.
+#
+# Keeps the most recent N GHCR versions of each image and deletes older ones.
+# N is deliberately well above the 10-tag floor the rollback design requires:
+# rollback redeploys a pinned image tag rather than rebuilding, so an artefact
+# pruned too aggressively would turn a rollback into an outage.
+#
+# Untagged versions (superseded layers) are pruned separately and never count
+# against the keep-window.
+
+name: Registry Retention
+
+on:
+  schedule:
+    # 03:30 UTC every Sunday.
+    - cron: '30 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: 'Number of tagged versions to keep (minimum 10)'
+        required: false
+        default: '20'
+
+permissions:
+  packages: write
+
+jobs:
+  prune:
+    name: Prune old image versions
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [erp-server, erp-client]
+    steps:
+      - name: Validate keep-count floor
+        id: cfg
+        run: |
+          KEEP="${{ github.event.inputs.keep || '20' }}"
+          if [ "$KEEP" -lt 10 ]; then
+            echo "Refusing to keep fewer than 10 versions (requested $KEEP)." >&2
+            echo "Rollback depends on older tags remaining pullable." >&2
+            exit 1
+          fi
+          echo "keep=$KEEP" >> "$GITHUB_OUTPUT"
+          echo "Retaining the most recent $KEEP versions of ${{ matrix.package }}."
+
+      - name: Delete untagged versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ matrix.package }}
+          package-type: container
+          delete-only-untagged-versions: true
+
+      - name: Prune tagged versions beyond the keep-window
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ matrix.package }}
+          package-type: container
+          min-versions-to-keep: ${{ steps.cfg.outputs.keep }}
+          # Never delete a tag something might still be pinned to.
+          ignore-versions-regexp: '^(latest|v\d+\.\d+\.\d+)$'
