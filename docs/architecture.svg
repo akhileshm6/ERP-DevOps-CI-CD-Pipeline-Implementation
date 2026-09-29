@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 900" width="1240" height="900" font-family="Segoe UI, Helvetica Neue, Arial, sans-serif">
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arwRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b91c1c"/>
+    </marker>
+    <marker id="arwGrn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#15803d"/>
+    </marker>
+    <style>
+      .band  { fill:#f8fafc; stroke:#cbd5e1; stroke-width:1.5; }
+      .bandT { font-size:13px; font-weight:700; fill:#64748b; letter-spacing:1.2px; }
+      .node  { fill:#ffffff; stroke:#334155; stroke-width:1.8; }
+      .ci    { fill:#eff6ff; stroke:#1d4ed8; stroke-width:1.8; }
+      .reg   { fill:#f5f3ff; stroke:#6d28d9; stroke-width:1.8; }
+      .db    { fill:#ecfdf5; stroke:#047857; stroke-width:1.8; }
+      .gate  { fill:#fffbeb; stroke:#b45309; stroke-width:2.2; }
+      .ttl   { font-size:14px; font-weight:700; fill:#0f172a; }
+      .sub   { font-size:11.5px; fill:#475569; }
+      .edge  { stroke:#475569; stroke-width:1.8; fill:none; marker-end:url(#arw); }
+      .edgeR { stroke:#b91c1c; stroke-width:2.2; fill:none; marker-end:url(#arwRed); stroke-dasharray:7 4; }
+      .edgeG { stroke:#15803d; stroke-width:2; fill:none; marker-end:url(#arwGrn); }
+      .lbl   { font-size:10.5px; fill:#64748b; font-style:italic; }
+      .lblR  { font-size:10.5px; fill:#b91c1c; font-weight:600; }
+    </style>
+  </defs>
+
+  <rect width="1240" height="900" fill="#ffffff"/>
+  <text x="32" y="40" font-size="21" font-weight="700" fill="#0f172a">ERP DevOps CI/CD Pipeline — System Architecture</text>
+  <text x="32" y="62" font-size="12.5" fill="#64748b">Automated testing, containerisation and zero-downtime deployment for an enterprise metrics dashboard</text>
+  <line x1="32" y1="76" x2="1208" y2="76" stroke="#e2e8f0" stroke-width="2"/>
+
+  <rect class="band" rx="10" x="32" y="96" width="1176" height="96"/>
+  <text class="bandT" x="48" y="118">SOURCE CONTROL</text>
+  <rect class="node" rx="8" x="70" y="126" width="188" height="52"/>
+  <text class="ttl" x="164" y="148" text-anchor="middle">Developer</text>
+  <text class="sub" x="164" y="166" text-anchor="middle">feature branch to PR</text>
+
+  <rect class="node" rx="8" x="326" y="126" width="210" height="52"/>
+  <text class="ttl" x="431" y="148" text-anchor="middle">GitHub Repository</text>
+  <text class="sub" x="431" y="166" text-anchor="middle">main · branch protection</text>
+
+  <rect class="node" rx="8" x="604" y="126" width="228" height="52"/>
+  <text class="ttl" x="718" y="148" text-anchor="middle">Pull Request</text>
+  <text class="sub" x="718" y="166" text-anchor="middle">1 review + green check</text>
+
+  <rect class="db" rx="8" x="900" y="126" width="252" height="52"/>
+  <text class="ttl" x="1026" y="148" text-anchor="middle">Merge to main</text>
+  <text class="sub" x="1026" y="166" text-anchor="middle">triggers release pipeline</text>
+
+  <path class="edge" d="M258,152 H320"/>
+  <path class="edge" d="M536,152 H598"/>
+  <path class="edgeG" d="M832,152 H894"/>
+
+  <rect class="band" rx="10" x="32" y="212" width="1176" height="150"/>
+  <text class="bandT" x="48" y="234">CONTINUOUS INTEGRATION — .github/workflows/ci.yml</text>
+
+  <rect class="ci" rx="8" x="70" y="248" width="164" height="94"/>
+  <text class="ttl" x="152" y="272" text-anchor="middle">Quality &amp; Test</text>
+  <text class="sub" x="152" y="292" text-anchor="middle">npm ci</text>
+  <text class="sub" x="152" y="309" text-anchor="middle">ESLint · npm audit</text>
+  <text class="sub" x="152" y="326" text-anchor="middle">Jest + Supertest</text>
+
+  <rect class="ci" rx="8" x="278" y="248" width="164" height="94"/>
+  <text class="ttl" x="360" y="272" text-anchor="middle">Build Images</text>
+  <text class="sub" x="360" y="292" text-anchor="middle">Dockerfile.client</text>
+  <text class="sub" x="360" y="309" text-anchor="middle">Dockerfile.server</text>
+  <text class="sub" x="360" y="326" text-anchor="middle">tag = commit SHA</text>
+
+  <rect class="ci" rx="8" x="486" y="248" width="164" height="94"/>
+  <text class="ttl" x="568" y="272" text-anchor="middle">Publish</text>
+  <text class="sub" x="568" y="292" text-anchor="middle">push to registry</text>
+  <text class="sub" x="568" y="309" text-anchor="middle">immutable SHA tag</text>
+  <text class="sub" x="568" y="326" text-anchor="middle">plus :latest</text>
+
+  <rect class="ci" rx="8" x="694" y="248" width="164" height="94"/>
+  <text class="ttl" x="776" y="272" text-anchor="middle">Deploy Staging</text>
+  <text class="sub" x="776" y="292" text-anchor="middle">auto on main</text>
+  <text class="sub" x="776" y="309" text-anchor="middle">smoke test</text>
+  <text class="sub" x="776" y="326" text-anchor="middle">/health · /ready</text>
+
+  <rect class="gate" rx="8" x="902" y="248" width="250" height="94"/>
+  <text class="ttl" x="1027" y="272" text-anchor="middle">Production Gate</text>
+  <text class="sub" x="1027" y="292" text-anchor="middle">if: ref == refs/heads/main</text>
+  <text class="sub" x="1027" y="309" text-anchor="middle">environment: production</text>
+  <text class="sub" x="1027" y="326" text-anchor="middle">readiness must pass</text>
+
+  <path class="edge" d="M234,295 H272"/>
+  <path class="edge" d="M442,295 H480"/>
+  <path class="edge" d="M650,295 H688"/>
+  <path class="edge" d="M858,295 H896"/>
+  <path class="edge" d="M1026,178 V242"/>
+
+  <rect class="band" rx="10" x="32" y="382" width="556" height="126"/>
+  <text class="bandT" x="48" y="404">CONTAINER REGISTRY</text>
+  <rect class="reg" rx="8" x="70" y="418" width="222" height="72"/>
+  <text class="ttl" x="181" y="442" text-anchor="middle">GitHub Container Registry</text>
+  <text class="sub" x="181" y="461" text-anchor="middle">ghcr.io/OWNER/erp-server</text>
+  <text class="sub" x="181" y="478" text-anchor="middle">retention: last 10 tags kept</text>
+
+  <rect class="reg" rx="8" x="326" y="418" width="222" height="72"/>
+  <text class="ttl" x="437" y="442" text-anchor="middle">Docker Hub</text>
+  <text class="sub" x="437" y="461" text-anchor="middle">erp-backend · erp-frontend</text>
+  <text class="sub" x="437" y="478" text-anchor="middle">legacy :latest publish</text>
+
+  <path class="edge" d="M568,342 V400 H300"/>
+  <text class="lbl" x="452" y="394">push SHA-tagged images</text>
+
+  <rect class="band" rx="10" x="620" y="382" width="588" height="126"/>
+  <text class="bandT" x="636" y="404">ROLLBACK — .github/workflows/rollback.yml</text>
+  <rect class="node" rx="8" x="656" y="418" width="248" height="72"/>
+  <text class="ttl" x="780" y="442" text-anchor="middle">Automatic Rollback</text>
+  <text class="sub" x="780" y="461" text-anchor="middle">post-deploy smoke test fails</text>
+  <text class="sub" x="780" y="478" text-anchor="middle">redeploy previous SHA</text>
+
+  <rect class="node" rx="8" x="936" y="418" width="248" height="72"/>
+  <text class="ttl" x="1060" y="442" text-anchor="middle">Manual Rollback</text>
+  <text class="sub" x="1060" y="461" text-anchor="middle">workflow_dispatch · Admin</text>
+  <text class="sub" x="1060" y="478" text-anchor="middle">pick version, confirm</text>
+
+  <rect class="band" rx="10" x="32" y="528" width="1176" height="286"/>
+  <text class="bandT" x="48" y="550">RUNTIME ENVIRONMENTS — Docker containers on Render</text>
+
+  <rect x="70" y="566" width="520" height="228" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4" rx="10"/>
+  <text x="90" y="590" font-size="13.5" font-weight="700" fill="#334155">STAGING</text>
+  <text class="sub" x="90" y="608">auto-deploy · NODE_ENV=staging</text>
+
+  <rect class="node" rx="8" x="96" y="622" width="212" height="62"/>
+  <text class="ttl" x="202" y="645" text-anchor="middle">Client — Nginx</text>
+  <text class="sub" x="202" y="663" text-anchor="middle">React SPA (multi-stage)</text>
+  <text class="sub" x="202" y="678" text-anchor="middle">:80</text>
+
+  <rect class="node" rx="8" x="352" y="622" width="212" height="62"/>
+  <text class="ttl" x="458" y="645" text-anchor="middle">API — Express</text>
+  <text class="sub" x="458" y="663" text-anchor="middle">Node 18 Alpine · non-root</text>
+  <text class="sub" x="458" y="678" text-anchor="middle">:5000</text>
+
+  <rect class="db" rx="8" x="224" y="712" width="212" height="62"/>
+  <text class="ttl" x="330" y="735" text-anchor="middle">PostgreSQL 15</text>
+  <text class="sub" x="330" y="753" text-anchor="middle">managed instance</text>
+  <text class="sub" x="330" y="768" text-anchor="middle">named volume (local)</text>
+
+  <path class="edge" d="M308,653 H346"/>
+  <text class="lbl" x="327" y="645" text-anchor="middle">REST</text>
+  <path class="edge" d="M436,684 L360,706"/>
+  <text class="lbl" x="420" y="703">SQL</text>
+
+  <rect x="650" y="566" width="520" height="228" fill="#ffffff" stroke="#047857" stroke-width="2" rx="10"/>
+  <text x="670" y="590" font-size="13.5" font-weight="700" fill="#065f46">PRODUCTION</text>
+  <text class="sub" x="670" y="608">gated on main · NODE_ENV=production</text>
+
+  <rect class="node" rx="8" x="676" y="622" width="212" height="62"/>
+  <text class="ttl" x="782" y="645" text-anchor="middle">Client — Nginx</text>
+  <text class="sub" x="782" y="663" text-anchor="middle">React SPA · HTTPS enforced</text>
+  <text class="sub" x="782" y="678" text-anchor="middle">:443</text>
+
+  <rect class="node" rx="8" x="932" y="622" width="212" height="62"/>
+  <text class="ttl" x="1038" y="645" text-anchor="middle">API — Express</text>
+  <text class="sub" x="1038" y="663" text-anchor="middle">Helmet · CORS · JWT RBAC</text>
+  <text class="sub" x="1038" y="678" text-anchor="middle">:5000</text>
+
+  <rect class="db" rx="8" x="804" y="712" width="212" height="62"/>
+  <text class="ttl" x="910" y="735" text-anchor="middle">PostgreSQL 15</text>
+  <text class="sub" x="910" y="753" text-anchor="middle">managed · additive migrations</text>
+  <text class="sub" x="910" y="768" text-anchor="middle">rollback-safe schema</text>
+
+  <path class="edge" d="M888,653 H926"/>
+  <text class="lbl" x="907" y="645" text-anchor="middle">REST</text>
+  <path class="edge" d="M1016,684 L940,706"/>
+  <text class="lbl" x="1000" y="703">SQL</text>
+
+  <path class="edgeG" d="M776,342 V556"/>
+  <path class="edgeG" d="M1027,342 V556"/>
+
+  <path class="edgeR" d="M780,490 V556"/>
+  <text class="lblR" x="788" y="524">redeploy pinned SHA</text>
+
+  <path class="edge" d="M181,490 V566"/>
+  <text class="lbl" x="188" y="530">pull image</text>
+
+  <rect x="32" y="830" width="1176" height="48" fill="#f8fafc" stroke="#e2e8f0" rx="8"/>
+  <rect x="52" y="846" width="15" height="15" class="ci" rx="3"/>
+  <text class="sub" x="75" y="858">CI/CD job</text>
+  <rect x="164" y="846" width="15" height="15" class="reg" rx="3"/>
+  <text class="sub" x="187" y="858">Registry</text>
+  <rect x="272" y="846" width="15" height="15" class="db" rx="3"/>
+  <text class="sub" x="295" y="858">Data / success path</text>
+  <rect x="428" y="846" width="15" height="15" class="gate" rx="3"/>
+  <text class="sub" x="451" y="858">Deployment gate</text>
+  <line x1="580" y1="853" x2="622" y2="853" class="edgeR"/>
+  <text class="sub" x="630" y="858">Rollback path (automatic or manual)</text>
+  <text class="sub" x="900" y="858">SP301 · Vivek Anand · Methodology, Tools &amp; Technologies</text>
+</svg>
