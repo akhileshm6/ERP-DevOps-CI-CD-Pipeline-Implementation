@@ -69,3 +69,151 @@ jobs:
 
       - name: Trigger Frontend Cloud Deployment
         run: curl -X POST ${{ secrets.RENDER_FRONTEND_HOOK }}
+
+  # ===================================================================
+  # Added by Vivek (Week 4 / Week 7) — Containerisation & Architecture.
+  # APPEND ONLY: nothing above this line has been modified.
+  # Existing jobs `quality-and-test` and `publish-and-deploy` are Ayush's.
+  # ===================================================================
+
+  # Publish immutable, per-commit image tags to GHCR.
+  # Ayush's Docker Hub job publishes :latest only; rollback and registry
+  # retention both need a tag that pins one exact commit, so this runs
+  # alongside it rather than replacing it.
+  publish-ghcr:
+    name: Publish SHA-tagged images to GHCR
+    needs: quality-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase the owner for the image path
+        id: owner
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and Push Backend (SHA + latest)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          push: true
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.name }}/erp-server:${{ github.sha }}
+            ghcr.io/${{ steps.owner.outputs.name }}/erp-server:latest
+
+      - name: Build and Push Frontend (SHA + latest)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./client
+          push: true
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.name }}/erp-client:${{ github.sha }}
+            ghcr.io/${{ steps.owner.outputs.name }}/erp-client:latest
+
+  # Readiness gate. Boots the exact image built from this commit against a
+  # throwaway Postgres and requires /ready to return 200. This is what the
+  # production deploy hangs on, so a broken readiness probe can never reach
+  # production.
+  readiness-gate:
+    name: Readiness gate (blocks production)
+    needs: publish-ghcr
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: erp_user
+          POSTGRES_PASSWORD: erp_password
+          POSTGRES_DB: erp_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U erp_user -d erp_db"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Server Dependencies
+        run: cd server && npm ci
+
+      - name: Apply migrations
+        env:
+          PGPASSWORD: erp_password
+        run: |
+          for f in server/db/*.sql; do
+            echo "applying $f"
+            psql -h localhost -U erp_user -d erp_db -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Start API and probe /ready
+        env:
+          NODE_ENV: test
+          PORT: 5000
+          DATABASE_URL: postgres://erp_user:erp_password@localhost:5432/erp_db
+          JWT_SECRET: ci_gate_secret
+        run: |
+          cd server && node server.js &
+          for i in $(seq 1 30); do
+            sleep 2
+            code=$(curl -s -o /tmp/ready.json -w '%{http_code}' http://localhost:5000/ready || echo 000)
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "READINESS GATE PASSED"; cat /tmp/ready.json; exit 0
+            fi
+          done
+          echo "READINESS GATE FAILED — refusing to promote this build"
+          cat /tmp/ready.json 2>/dev/null || true
+          exit 1
+
+  # Production deploy. Gated three ways:
+  #   1. `if:` guard — only ever runs for a push to main
+  #   2. `needs: readiness-gate` — a failed probe blocks it
+  #   3. `environment: production` — GitHub holds it for a required reviewer
+  deploy-production:
+    name: Deploy to production (main only)
+    needs: readiness-gate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Trigger production deployment
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
+            echo "RENDER_DEPLOY_HOOK not set for the production environment." >&2
+            echo "Add it under Settings -> Environments -> production." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          echo "Production deploy triggered for ${{ github.sha }}"
+
+      - name: Post-deploy smoke test
+        run: |
+          sleep 45
+          code=$(curl -s -o /dev/null -w '%{http_code}' "${{ secrets.APP_BASE_URL }}/ready" || echo 000)
+          echo "production /ready -> HTTP $code"
+          [ "$code" = "200" ] || { echo "Smoke test failed; rollback should fire." >&2; exit 1; }

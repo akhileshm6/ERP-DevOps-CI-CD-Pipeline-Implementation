@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
+const db = require('./db/pool');
 
 // Route Modules
 const employeeRoutes = require('./routes/employees');
@@ -20,18 +21,19 @@ app.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok' });
 });
 
-// GET /ready -> checks database connectivity
+// GET /ready -> checks real database connectivity.
+// READINESS_FORCE_FAIL=true makes this return 503 without touching the DB;
+// used by the pipeline's gating test to prove the deploy gate actually blocks.
 app.get('/ready', async (req, res) => {
     try {
-        const isDbConnected = true;
-
-        if (isDbConnected) {
-            res.status(200).json({ ready: true, database: 'connected' });
-        } else {
-            throw new Error('Database connection failed');
+        if (process.env.READINESS_FORCE_FAIL === 'true') {
+            throw new Error('Readiness deliberately disabled for gate testing');
         }
+
+        await db.isHealthy();
+        res.status(200).json({ ready: true, database: 'connected' });
     } catch (err) {
-        res.status(500).json({ ready: false, error: err.message });
+        res.status(503).json({ ready: false, database: 'unreachable', error: err.message });
     }
 });
 
