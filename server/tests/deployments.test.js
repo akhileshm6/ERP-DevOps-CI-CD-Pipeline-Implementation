@@ -1,6 +1,5 @@
 const request = require('supertest');
-const app = require('../app');
-
+const app = require('../server');
 describe('GET /api/deployments/current', () => {
   test('returns the current deployment contract', async () => {
     const response = await request(app)
