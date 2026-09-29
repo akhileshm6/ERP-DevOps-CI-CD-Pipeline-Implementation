@@ -59,7 +59,7 @@ services:
     container_name: erp-client
     restart: unless-stopped
     ports:
-      - "${CLIENT_PORT:-3000}:80"
+      - "${CLIENT_PORT:-3000}:8080"
     depends_on:
       server:
         condition: service_started

@@ -1,4 +1,6 @@
 const express = require('express');
+const helmet = require('helmet');
+const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
@@ -14,8 +16,56 @@ const flagRoutes = require('./routes/flags');   // Vivek — Phase 6
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const IS_HOSTED = /^(staging|production)$/.test(process.env.NODE_ENV || '');
 
-app.use(express.json());
+// ---- Security hardening (Vivek, Week 11) -------------------------------
+
+// Render/Railway terminate TLS at their edge and forward over plain HTTP, so
+// Express must trust the proxy for req.secure and the client IP to be real.
+if (IS_HOSTED) {
+    app.set('trust proxy', 1);
+}
+
+// Helmet sets the standard protective headers (CSP, X-Frame-Options, noSniff,
+// Referrer-Policy and the rest). HSTS is enabled only where HTTPS actually
+// terminates — sending it from a plain-HTTP local container would pin the
+// browser to https://localhost and break development.
+app.use(helmet({
+    hsts: IS_HOSTED ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
+    crossOriginResourcePolicy: { policy: 'same-site' },
+}));
+
+// Redirect any request that reached us over plain HTTP. Belt-and-braces: the
+// host should already be doing this at its edge.
+if (IS_HOSTED) {
+    app.use((req, res, next) => {
+        if (req.secure || req.get('x-forwarded-proto') === 'https') return next();
+        return res.redirect(308, `https://${req.get('host')}${req.originalUrl}`);
+    });
+}
+
+// Strict CORS allow-list. Origins come from CORS_ALLOWED_ORIGINS as a
+// comma-separated list; anything not on it is refused rather than reflected.
+const ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+app.use(cors({
+    origin(origin, callback) {
+        // No Origin header: same-origin navigations, curl, health probes.
+        if (!origin) return callback(null, true);
+        if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+        return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    maxAge: 86400,
+}));
+
+// Cap request bodies so a single oversized payload cannot exhaust memory.
+app.use(express.json({ limit: '1mb' }));
 
 // GET /health -> checks basic application availability
 app.get('/health', (req, res) => {
@@ -93,6 +143,20 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/flags', flagRoutes);   // Vivek — Phase 6 (GET /api/flags/evaluate)
+
+// ---- Error handling (Vivek, Week 11) -----------------------------------
+// A CORS rejection is a client error, not a server fault. Without this the
+// rejected Error propagates to Express's default handler and surfaces as a
+// 500, which misreports the cause and leaks a stack trace in development.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+    if (err && /not allowed by CORS/.test(err.message)) {
+        return res.status(403).json({ error: 'Origin not allowed.' });
+    }
+
+    console.error('[error]', err && err.message);
+    res.status(500).json({ error: 'Internal server error' });
+});
 
 // Only listen when executed directly (allows supertest in Jest)
 if (require.main === module) {
