@@ -1,5 +1,10 @@
 const jwt = require('jsonwebtoken');
 
+const normalizeRole = (role) => {
+    if (typeof role !== 'string') return '';
+    return role.trim().toLowerCase();
+};
+
 // Verify JWT Token
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -21,7 +26,10 @@ const authenticateToken = (req, res, next) => {
 // Enforce Role-Based Access Control (RBAC)
 const authorizeRoles = (...allowedRoles) => {
     return (req, res, next) => {
-        if (!req.user || !allowedRoles.includes(req.user.role)) {
+        const normalizedUserRole = normalizeRole(req.user && req.user.role);
+        const normalizedAllowedRoles = allowedRoles.map(normalizeRole);
+
+        if (!req.user || !normalizedAllowedRoles.includes(normalizedUserRole)) {
             return res.status(403).json({ error: 'Access denied. Unauthorized role.' });
         }
         next();

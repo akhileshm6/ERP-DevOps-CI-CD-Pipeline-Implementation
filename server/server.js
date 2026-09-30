@@ -10,6 +10,17 @@ const invoiceRoutes = require('./routes/invoices');
 const reportRoutes = require('./routes/reports');
 const metricsRoutes = require('./routes/metrics');
 
+const normalizeRole = (role) => {
+    if (typeof role !== 'string') return 'Employee';
+
+    const trimmedRole = role.trim();
+    const lowerRole = trimmedRole.toLowerCase();
+
+    if (lowerRole === 'admin') return 'Admin';
+    if (lowerRole === 'manager') return 'Manager';
+    return 'Employee';
+};
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -48,8 +59,9 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(400).json({ error: 'User already exists' });
         }
 
+        const normalizedRole = normalizeRole(role);
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = { id: registeredUsers.length + 1, name, email, password: hashedPassword, role: role || 'Employee' };
+        const newUser = { id: registeredUsers.length + 1, name, email, password: hashedPassword, role: normalizedRole };
         registeredUsers.push(newUser);
 
         res.status(201).json({ message: 'User registered successfully', userId: newUser.id });
