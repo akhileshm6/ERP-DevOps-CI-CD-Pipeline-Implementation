@@ -19,90 +19,112 @@ function getRangeStart(range) {
 	return start;
 }
 
+// The window of equal length immediately before the selected range.
+function getPreviousRange(range) {
+	const end = getRangeStart(range);
+	const start = new Date(end);
+	start.setDate(start.getDate() - RANGE_DAYS[range]);
+	return { start, end };
+}
+
 function inRange(date, rangeStart) {
 	return new Date(date) >= rangeStart;
 }
 
+const round2 = (n) => Number(n.toFixed(2));
+const sumBy = (rows, key) => rows.reduce((sum, row) => sum + (row[key] || 0), 0);
+
+// Flow metric: orders and revenue inside the selected period.
 async function getSalesMetrics(range = '30d') {
 	const rangeStart = getRangeStart(range);
-	const rows = (await metricsSource.sales()).filter((sale) => inRange(sale.createdAt, rangeStart));
-	const totalRevenue = rows.reduce((sum, sale) => sum + (sale.totalAmount || 0), 0);
-	const completedOrders = rows.filter((sale) => sale.status === 'Completed').length;
-	const pendingOrders = rows.filter((sale) => sale.status === 'Pending').length;
+	const all = await metricsSource.sales();
+	const rows = all.filter((sale) => inRange(sale.createdAt, rangeStart));
+	const totalRevenue = sumBy(rows, 'totalAmount');
+
+	// Compare against the previous period only when it actually has orders;
+	// otherwise there is nothing honest to compare with, so report null.
+	const prev = getPreviousRange(range);
+	const prevRows = all.filter((sale) => {
+		const d = new Date(sale.createdAt);
+		return d >= prev.start && d < prev.end;
+	});
+	const previousPeriodRevenue = prevRows.length ? round2(sumBy(prevRows, 'totalAmount')) : null;
 
 	return {
 		range,
 		data: rows,
 		summary: {
 			orderCount: rows.length,
-			totalRevenue: Number(totalRevenue.toFixed(2)),
-			averageOrderValue: rows.length ? Number((totalRevenue / rows.length).toFixed(2)) : 0,
-			completedOrders,
-			pendingOrders
+			totalRevenue: round2(totalRevenue),
+			averageOrderValue: rows.length ? round2(totalRevenue / rows.length) : 0,
+			completedOrders: rows.filter((sale) => sale.status === 'Completed').length,
+			pendingOrders: rows.filter((sale) => sale.status === 'Pending').length,
+			refundedOrders: rows.filter((sale) => sale.status === 'Refunded').length,
+			previousPeriodRevenue
 		}
 	};
 }
 
+// Stock metric: a point-in-time snapshot. Stock on hand does not depend on
+// when an item was first created, so the range is validated but not applied.
 async function getInventoryMetrics(range = '30d') {
-	const rangeStart = getRangeStart(range);
-	const rows = (await metricsSource.inventory()).filter((item) => inRange(item.createdAt, rangeStart));
+	getRangeStart(range);
+	const rows = await metricsSource.inventory();
 	const lowStockItems = rows.filter((item) => item.quantity <= item.minStockLevel);
-	const stockValue = rows.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-	const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0);
 
 	return {
 		range,
+		asOf: new Date().toISOString(),
 		data: rows,
 		summary: {
 			itemCount: rows.length,
 			lowStockCount: lowStockItems.length,
-			stockValue: Number(stockValue.toFixed(2)),
-			totalQuantity
+			stockValue: round2(rows.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)),
+			totalQuantity: sumBy(rows, 'quantity')
 		}
 	};
 }
 
+// Headcount is a snapshot of the current roster; only new hires depend on the range.
 async function getHrMetrics(range = '30d') {
 	const rangeStart = getRangeStart(range);
-	const rows = (await metricsSource.hr()).filter((emp) => inRange(emp.createdAt, rangeStart));
-	const activeEmployees = rows.filter((emp) => emp.status === 'Active');
-	const totalSalary = rows.reduce((sum, emp) => sum + (emp.salary || 0), 0);
-	const totalRating = rows.reduce((sum, emp) => sum + (emp.performanceRating || 0), 0);
-	const departments = new Set(rows.map((emp) => emp.department));
+	const rows = await metricsSource.hr();
+	const rated = rows.filter((emp) => typeof emp.performanceRating === 'number');
 
 	return {
 		range,
+		asOf: new Date().toISOString(),
 		data: rows,
 		summary: {
 			totalEmployees: rows.length,
-			activeCount: activeEmployees.length,
-			averageSalary: rows.length ? Number((totalSalary / rows.length).toFixed(2)) : 0,
-			avgPerformance: rows.length ? Number((totalRating / rows.length).toFixed(2)) : 0,
-			departmentCount: departments.size
+			activeCount: rows.filter((emp) => emp.status === 'Active').length,
+			onLeaveCount: rows.filter((emp) => emp.status === 'On Leave').length,
+			newHires: rows.filter((emp) => emp.hireDate && inRange(emp.hireDate, rangeStart)).length,
+			averageSalary: rows.length ? round2(sumBy(rows, 'salary') / rows.length) : 0,
+			avgPerformance: rated.length ? round2(sumBy(rated, 'performanceRating') / rated.length) : 0,
+			departmentCount: new Set(rows.map((emp) => emp.department)).size
 		}
 	};
 }
 
+// Flow metric: transactions inside the selected period.
 async function getFinanceMetrics(range = '30d') {
 	const rangeStart = getRangeStart(range);
 	const rows = (await metricsSource.finance()).filter((tx) => inRange(tx.createdAt, rangeStart));
-	const revenues = rows.filter((tx) => tx.transactionType === 'Revenue');
-	const expenses = rows.filter((tx) => tx.transactionType === 'Expense');
-
-	const totalRevenue = revenues.reduce((sum, tx) => sum + (tx.amount || 0), 0);
-	const totalExpenses = expenses.reduce((sum, tx) => sum + (tx.amount || 0), 0);
-	const netProfit = Number((totalRevenue - totalExpenses).toFixed(2));
-	const profitMargin = totalRevenue > 0 ? Number(((netProfit / totalRevenue) * 100).toFixed(2)) : 0;
+	const totalRevenue = sumBy(rows.filter((tx) => tx.transactionType === 'Revenue'), 'amount');
+	const totalExpenses = sumBy(rows.filter((tx) => tx.transactionType === 'Expense'), 'amount');
+	const netProfit = round2(totalRevenue - totalExpenses);
 
 	return {
 		range,
 		data: rows,
 		summary: {
-			totalRevenue: Number(totalRevenue.toFixed(2)),
-			totalExpenses: Number(totalExpenses.toFixed(2)),
+			totalRevenue: round2(totalRevenue),
+			totalExpenses: round2(totalExpenses),
 			netProfit,
-			profitMargin,
-			transactionCount: rows.length
+			profitMargin: totalRevenue > 0 ? round2((netProfit / totalRevenue) * 100) : 0,
+			transactionCount: rows.length,
+			pendingCount: rows.filter((tx) => tx.status === 'Pending').length
 		}
 	};
 }
@@ -112,5 +134,6 @@ module.exports = {
 	getInventoryMetrics,
 	getHrMetrics,
 	getFinanceMetrics,
-	getRangeStart
+	getRangeStart,
+	RANGE_DAYS
 };

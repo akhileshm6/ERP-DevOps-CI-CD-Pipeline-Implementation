@@ -135,12 +135,13 @@ jobs:
   # production.
   readiness-gate:
     name: Readiness gate (blocks production)
-    needs: publish-ghcr
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Runs on pull requests too, so the gate is proven before anything merges.
+    # It boots the API from this commit against a real Postgres, through the
+    # same startup path production uses: migrate -> seed -> serve.
+    needs: quality-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
     services:
       postgres:
         image: postgres:15-alpine
@@ -153,6 +154,10 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U erp_user -d erp_db"
           --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://erp_user:erp_password@localhost:5432/erp_db
+      JWT_SECRET: ci_gate_secret
+      NODE_ENV: development
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -165,23 +170,28 @@ jobs:
       - name: Install Server Dependencies
         run: cd server && npm ci
 
-      - name: Apply migrations
-        env:
-          PGPASSWORD: erp_password
-        run: |
-          for f in server/db/*.sql; do
-            echo "applying $f"
-            psql -h localhost -U erp_user -d erp_db -v ON_ERROR_STOP=1 -f "$f"
-          done
+      - name: Apply migrations (runner)
+        run: cd server && npm run migrate
 
-      - name: Start API and probe /ready
-        env:
-          NODE_ENV: test
-          PORT: 5000
-          DATABASE_URL: postgres://erp_user:erp_password@localhost:5432/erp_db
-          JWT_SECRET: ci_gate_secret
+      - name: Re-run migrations (must be a no-op)
+        run: cd server && npm run migrate | tee /tmp/migrate2.log && grep -q "up to date" /tmp/migrate2.log
+
+      - name: Failure path — a forced readiness failure must return 503
         run: |
-          cd server && node server.js &
+          cd server && READINESS_FORCE_FAIL=true PORT=5001 node server.js &
+          for i in $(seq 1 15); do
+            sleep 2
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5001/ready || echo 000)
+            [ "$code" = "000" ] && continue
+            echo "forced-fail /ready -> HTTP $code"
+            [ "$code" = "503" ] && { echo "Gate correctly reports not ready"; exit 0; }
+            echo "Expected 503 from a forced failure" >&2; exit 1
+          done
+          echo "API never started" >&2; exit 1
+
+      - name: Success path — start API and probe /ready
+        run: |
+          cd server && PORT=5000 node server.js > /tmp/server.log 2>&1 &
           for i in $(seq 1 30); do
             sleep 2
             code=$(curl -s -o /tmp/ready.json -w '%{http_code}' http://localhost:5000/ready || echo 000)
@@ -191,16 +201,31 @@ jobs:
             fi
           done
           echo "READINESS GATE FAILED — refusing to promote this build"
-          cat /tmp/ready.json 2>/dev/null || true
+          cat /tmp/ready.json 2>/dev/null || true; cat /tmp/server.log
           exit 1
+
+      - name: API smoke test (login, RBAC, seeded data)
+        run: |
+          sleep 3   # let first-boot seeding finish
+          login() { curl -fsS http://localhost:5000/api/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"password\":\"$2\"}" | jq -r .token; }
+          ADMIN=$(login admin@erp.local 'Admin123!')
+          USER=$(login user@erp.local 'User123!')
+          code() { curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" "http://localhost:5000$2"; }
+          check() { got=$(code "$1" "$2"); echo "$3 $2 -> $got"; [ "$got" = "$4" ] || exit 1; }
+          check ""      /api/metrics/sales   anon  401
+          check "$USER" /api/metrics/sales   user  200
+          check "$USER" /api/metrics/finance user  403
+          check "$ADMIN" /api/reports/summary admin 200
+          orders=$(curl -fsS -H "Authorization: Bearer $ADMIN" http://localhost:5000/api/metrics/sales | jq .summary.orderCount)
+          echo "seeded orders in last 30 days: $orders"; [ "$orders" -gt 0 ]
 
   # Production deploy. Gated three ways:
   #   1. `if:` guard — only ever runs for a push to main
-  #   2. `needs: readiness-gate` — a failed probe blocks it
+  #   2. `needs: [publish-ghcr, readiness-gate]` — a failed probe blocks it
   #   3. `environment: production` — GitHub holds it for a required reviewer
   deploy-production:
     name: Deploy to production (main only)
-    needs: readiness-gate
+    needs: [publish-ghcr, readiness-gate]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:

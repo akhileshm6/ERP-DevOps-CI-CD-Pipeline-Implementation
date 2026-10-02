@@ -158,4 +158,21 @@ const usersRepository = {
     }
 };
 
-module.exports = { inventoryRepository, salesRepository, metricsSource, usersRepository };
+// Staff roster (hr_staff). The same rows feed the HR metrics.
+const employeesRepository = {
+    list: () => metricsSource.hr(),
+    async create({ name, department, role, salary, status, hireDate }) {
+        const { rows } = await db.query(
+            `INSERT INTO hr_staff (name, department, role, salary, status, hire_date)
+             VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE)) RETURNING *`,
+            [name, department, role, salary, status, hireDate || null]
+        );
+        const r = rows[0];
+        return {
+            id: r.id, name: r.name, department: r.department, role: r.role, salary: Number(r.salary),
+            performanceRating: null, status: r.status, hireDate: iso(r.hire_date).split('T')[0], createdAt: iso(r.created_at)
+        };
+    }
+};
+
+module.exports = { inventoryRepository, salesRepository, metricsSource, usersRepository, employeesRepository };

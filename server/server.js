@@ -13,9 +13,11 @@ const invoiceRoutes = require('./routes/invoices');
 const reportRoutes = require('./routes/reports');
 const metricsRoutes = require('./routes/metrics');
 const flagRoutes = require('./routes/flags');   // Vivek — Phase 6
-const deploymentsRoutes = require('./routes/deployments');
-const { usersRepository } = require('./db/repositories');
-const { bootstrap } = require('./db/bootstrap');   // Akhilesh — deployment history
+const deploymentsRoutes = require('./routes/deployments');   // Akhilesh — deployment history
+const statusRoutes = require('./routes/status');
+const { usersRepository, store } = require('./db/repositories');
+const { bootstrap } = require('./db/bootstrap');
+const { migrate } = require('./db/migrate');
 const promClient = require('prom-client');
 
 const normalizeRole = (role) => {
@@ -97,10 +99,17 @@ app.get('/ready', async (req, res) => {
         }
 
         await db.isHealthy();
-        res.status(200).json({ ready: true, database: 'connected' });
     } catch (err) {
-        res.status(503).json({ ready: false, database: 'unreachable', error: err.message });
+        console.error('[ready] check failed:', err.message);
+        return res.status(503).json({ ready: false, database: 'unreachable' });
     }
+
+    // A reachable database with a schema that failed to migrate is not ready:
+    // this is what lets the deploy gate block a release whose migration broke.
+    if (startupState.migrationError) {
+        return res.status(503).json({ ready: false, database: 'connected', migrations: 'failed' });
+    }
+    res.status(200).json({ ready: true, database: 'connected' });
 });
 
 // Mock user storage
@@ -183,6 +192,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/flags', flagRoutes);   // Vivek — Phase 6 (GET /api/flags/evaluate)
 app.use('/api/deployments', deploymentsRoutes);   // Akhilesh — deployment history
+app.use('/api/status', statusRoutes);
 
 // Prometheus scrape endpoint (Akhilesh). Default metrics are registered once
 // per process; Jest re-requires this module, so guard against double registration.
@@ -212,29 +222,43 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
-// Seed demo accounts/data, retrying while the database comes up. The server
-// listens regardless: /ready reports 503 until the database is reachable.
-const bootstrapWithRetry = async (attempts = 10) => {
+// Startup: apply pending migrations, then seed demo accounts/data, retrying
+// while the database comes up. The server listens regardless; /ready reports
+// 503 until the database is reachable and the schema migrated cleanly.
+// Set MIGRATE_ON_START=false to run `npm run migrate` as a separate step instead.
+const startupState = { migrationError: null };
+
+const startup = async (attempts = 10) => {
     for (let i = 1; i <= attempts; i += 1) {
         try {
+            if (store === 'postgres' && process.env.MIGRATE_ON_START !== 'false') {
+                await migrate();
+            }
             await bootstrap();
             return;
         } catch (err) {
-            console.error(`[bootstrap] attempt ${i}/${attempts} failed: ${err.message}`);
+            if (err.fatal) {
+                // A bad migration will not fix itself on retry.
+                startupState.migrationError = err.message;
+                console.error(`[migrate] FAILED, service will report not ready: ${err.message}`);
+                return;
+            }
+            console.error(`[startup] attempt ${i}/${attempts} failed: ${err.message}`);
             await new Promise((resolve) => setTimeout(resolve, 3000));
         }
     }
-    console.error('[bootstrap] giving up; demo users/data were not created');
+    console.error('[startup] giving up; migrations/demo data were not applied');
 };
 
 // Only listen when executed directly (allows supertest in Jest)
 if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`Server running on port ${PORT}`);
-        bootstrapWithRetry();
+        startup();
     });
 }
 
 app.bootstrap = bootstrap;
+app.startupState = startupState;
 
 module.exports = app;

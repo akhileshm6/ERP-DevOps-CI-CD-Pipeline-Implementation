@@ -88,4 +88,14 @@ const usersRepository = {
     }
 };
 
-module.exports = { inventoryRepository, salesRepository, metricsSource, usersRepository };
+// Staff roster. Shares the seed.hr array so new hires show up in HR metrics.
+const employeesRepository = {
+    async list() { return seed.hr; },
+    async create(employee) {
+        const record = { id: seed.hr.length + 1, performanceRating: null, createdAt: new Date().toISOString(), ...employee };
+        seed.hr.push(record);
+        return record;
+    }
+};
+
+module.exports = { inventoryRepository, salesRepository, metricsSource, usersRepository, employeesRepository };
