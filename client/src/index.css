@@ -871,3 +871,28 @@ body {
   .deployment-history-header { align-items: flex-start; flex-direction: column; padding: 16px; }
   .deployment-pagination { align-items: flex-start; flex-direction: column; gap: 10px; }
 }
+
+/* ---- Auth: login screen and header session ---- */
+.login-screen { align-items: center; display: flex; justify-content: center; min-height: 100vh; padding: 24px 16px; }
+.login-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); display: flex; flex-direction: column; gap: 16px; max-width: 400px; padding: 28px; width: 100%; }
+.login-field { color: var(--text-secondary); display: flex; flex-direction: column; font-size: 0.75rem; font-weight: 600; gap: 6px; }
+.login-field input { background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); font: inherit; font-size: 0.88rem; font-weight: 400; padding: 9px 11px; }
+.login-field input:focus-visible { outline: 2px solid #34d399; outline-offset: 1px; }
+.login-submit { justify-content: center; width: 100%; }
+.login-submit:disabled { cursor: not-allowed; opacity: 0.6; }
+.login-error, .login-notice { align-items: center; border-radius: var(--radius-sm); display: flex; font-size: 0.8rem; gap: 8px; padding: 9px 11px; }
+.login-error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; }
+.login-notice { background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #fbbf24; }
+.login-demo { border-top: 1px solid var(--border-subtle); color: var(--text-muted); display: flex; flex-direction: column; font-size: 0.72rem; gap: 8px; padding-top: 14px; }
+.login-demo > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.user-chip { align-items: center; color: var(--text-secondary); display: inline-flex; font-size: 0.8rem; gap: 8px; }
+.user-chip strong { color: var(--text-primary); font-weight: 600; }
+.user-role-badge { background: rgba(16, 185, 129, 0.12); border-radius: var(--radius-full); color: #34d399; font-size: 0.7rem; font-weight: 700; padding: 2px 8px; }
+.current-version-pill { color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.75rem; }
+
+/* ---- Live deployment statuses and flag errors ---- */
+.deployment-status-success { background: rgba(16, 185, 129, 0.12); color: #34d399; }
+.deployment-status-in-progress, .deployment-status-pending { background: rgba(59, 130, 246, 0.12); color: #60a5fa; }
+.deployment-commit { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.75rem; }
+.feature-flag-error { align-items: center; background: rgba(239, 68, 68, 0.1); border-bottom: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; display: flex; font-size: 0.8rem; gap: 8px; padding: 10px 24px; }
+.feature-flag-row.is-saving { opacity: 0.6; }

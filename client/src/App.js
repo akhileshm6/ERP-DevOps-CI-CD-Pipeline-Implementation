@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
-import { Activity, Boxes, BriefcaseBusiness, DollarSign, Flag, LayoutDashboard, Users } from 'lucide-react';
+import { Activity, Boxes, BriefcaseBusiness, DollarSign, Flag, GitCommitHorizontal, LayoutDashboard, LogOut, Users } from 'lucide-react';
 import {
   fetchFinanceMetrics,
   fetchHrMetrics,
   fetchInventoryMetrics,
   fetchSalesMetrics
 } from './api/metricsApi';
+import { fetchCurrentDeployment, fetchDeployments } from './api/deploymentsApi';
+import { getSessionFromToken, LOGOUT_EVENT, logout } from './api/client';
+import { LoginForm } from './components/auth/LoginForm';
+import { WidgetEmpty, WidgetError } from './components/common/WidgetStates';
 import { SalesSection } from './components/sections/SalesSection';
 import { InventorySection } from './components/sections/InventorySection';
 import { HRSection } from './components/sections/HRSection';
@@ -20,12 +24,7 @@ const queryClient = new QueryClient({
   }
 });
 
-const deploymentHistory = [
-  { id: 'dep-1042', version: 'v1.8.4', environment: 'Production', status: 'Succeeded', deployedAt: '2026-09-29T06:35:00Z', logsUrl: '/deployments/dep-1042/logs' },
-  { id: 'dep-1041', version: 'v1.8.3', environment: 'Staging', status: 'Succeeded', deployedAt: '2026-09-28T14:20:00Z', logsUrl: '/deployments/dep-1041/logs' },
-  { id: 'dep-1040', version: 'v1.8.3', environment: 'Production', status: 'Failed', deployedAt: '2026-09-28T11:15:00Z', logsUrl: '/deployments/dep-1040/logs' },
-  { id: 'dep-1039', version: 'v1.8.2', environment: 'Development', status: 'Rolled back', deployedAt: '2026-09-27T09:05:00Z', logsUrl: '/deployments/dep-1039/logs' }
-];
+const DEPLOYMENT_FETCH_LIMIT = 50;
 
 const dashboardViews = {
   Admin: {
@@ -45,31 +44,28 @@ const dashboardViews = {
   }
 };
 
-function getRoleFromToken() {
-  try {
-    const token = window.localStorage.getItem('token');
-    const payload = token?.split('.')[1];
-    if (!payload) return 'User';
+function DeploymentHistoryPanel({ userRole }) {
+  const deploymentsQuery = useQuery({
+    queryKey: ['deployments', 1, DEPLOYMENT_FETCH_LIMIT],
+    queryFn: () => fetchDeployments({ page: 1, limit: DEPLOYMENT_FETCH_LIMIT })
+  });
 
-    const base64Payload = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const claims = JSON.parse(window.atob(base64Payload.padEnd(Math.ceil(base64Payload.length / 4) * 4, '=')));
-    if (typeof claims.exp === 'number' && claims.exp <= Date.now() / 1000) return 'User';
-
-    const role = String(claims.role || '').trim().toLowerCase();
-    if (role === 'admin') return 'Admin';
-    if (role === 'manager') return 'Manager';
-    return 'User';
-  } catch {
-    return 'User';
+  if (deploymentsQuery.isError) {
+    return <section className="deployment-history"><WidgetError title="Deployment history unavailable" error={deploymentsQuery.error} onRetry={() => deploymentsQuery.refetch()} /></section>;
   }
+  const deployments = deploymentsQuery.data?.data || [];
+  if (deploymentsQuery.isSuccess && deployments.length === 0) {
+    return <section className="deployment-history"><WidgetEmpty title="No deployments yet" message="New releases will appear here once the pipeline records them." /></section>;
+  }
+  return <DeploymentHistoryTable deployments={deployments} userRole={userRole} isLoading={deploymentsQuery.isLoading} onRollback={(deployment) => window.alert(`Rollback for ${deployment.version} in ${deployment.environment} is run from the manual rollback workflow in CI.`)} />;
 }
 
-function Dashboard() {
+function Dashboard({ session, onLogout }) {
   const [ranges, setRanges] = useState({ sales: '30d', inventory: '30d', hr: '30d', finance: '30d' });
   const [activeDomain, setActiveDomain] = useState('all');
   const [activeAdminView, setActiveAdminView] = useState('overview');
   const [simulateSalesError, setSimulateSalesError] = useState(false);
-  const [userRole] = useState(getRoleFromToken);
+  const userRole = session.role;
   const dashboardView = dashboardViews[userRole];
 
   const salesQuery = useQuery({
@@ -94,6 +90,9 @@ function Dashboard() {
     enabled: userRole !== 'User'
   });
 
+  const currentDeploymentQuery = useQuery({ queryKey: ['deployments', 'current'], queryFn: fetchCurrentDeployment });
+  const currentVersion = currentDeploymentQuery.data?.version;
+
   const setRange = (domain) => (range) => setRanges((current) => ({ ...current, [domain]: range }));
   const domains = [
     { id: 'sales', label: 'Sales', Icon: DollarSign, section: <SalesSection queryState={salesQuery} range={ranges.sales} onRangeChange={setRange('sales')} isSimulatingError={simulateSalesError} onToggleSimulateError={() => setSimulateSalesError((current) => !current)} /> },
@@ -114,7 +113,10 @@ function Dashboard() {
           </div>
         </div>
         <div className="header-actions">
+          {currentVersion && <span className="current-version-pill" title={[currentDeploymentQuery.data.environment, currentDeploymentQuery.data.commitSha, currentDeploymentQuery.data.deployedAt].filter(Boolean).join(' · ')}><GitCommitHorizontal size={13} aria-hidden="true" /> {currentVersion}</span>}
           <span className="status-pill"><span className="status-dot" /> Live metrics</span>
+          <span className="user-chip"><strong>{session.name || 'Signed in'}</strong><span className="user-role-badge">{userRole}</span></span>
+          <button type="button" className="btn-secondary" onClick={onLogout}><LogOut size={14} aria-hidden="true" /> Log out</button>
         </div>
       </header>
 
@@ -133,14 +135,49 @@ function Dashboard() {
           {visibleDomains.filter(({ id }) => activeDomain === 'all' || activeDomain === id).map(({ id, section }) => <React.Fragment key={id}>{section}</React.Fragment>)}
         </section>
 
-        {dashboardView.showDeploymentHistory && <DeploymentHistoryTable deployments={deploymentHistory} userRole={userRole} onRollback={(deployment) => window.alert(`Rollback requested for ${deployment.version} in ${deployment.environment}.`)} />}
+        {dashboardView.showDeploymentHistory && <DeploymentHistoryPanel userRole={userRole} />}
       </>}
     </main>
   );
 }
 
 function App() {
-  return <QueryClientProvider client={queryClient}><Dashboard /></QueryClientProvider>;
+  const [session, setSession] = useState(() => getSessionFromToken());
+  const [notice, setNotice] = useState('');
+
+  const endSession = useCallback((message = '') => {
+    queryClient.clear();
+    setSession(null);
+    setNotice(message);
+  }, []);
+
+  useEffect(() => {
+    const handleLogout = () => endSession('Your session has ended. Please sign in again.');
+    window.addEventListener(LOGOUT_EVENT, handleLogout);
+    return () => window.removeEventListener(LOGOUT_EVENT, handleLogout);
+  }, [endSession]);
+
+  useEffect(() => {
+    if (typeof session?.exp !== 'number') return undefined;
+    const msUntilExpiry = session.exp * 1000 - Date.now();
+    const timer = window.setTimeout(() => logout(), Math.max(0, Math.min(msUntilExpiry, 2147483647)));
+    return () => window.clearTimeout(timer);
+  }, [session]);
+
+  const handleLogin = () => {
+    setNotice('');
+    setSession(getSessionFromToken());
+  };
+  const handleLogout = () => {
+    logout();
+    setNotice('');
+  };
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      {session ? <Dashboard key={session.id ?? session.name} session={session} onLogout={handleLogout} /> : <LoginForm onLogin={handleLogin} notice={notice} />}
+    </QueryClientProvider>
+  );
 }
 
 export default App;

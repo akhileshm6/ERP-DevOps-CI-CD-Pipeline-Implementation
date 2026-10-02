@@ -19,6 +19,13 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY . .
 
+# Build metadata, reported by GET /api/deployments/current. CI passes these as
+# build args; local builds fall back to "dev".
+ARG APP_VERSION=dev
+ARG COMMIT_SHA=local
+ARG GIT_BRANCH=local
+ENV APP_VERSION=$APP_VERSION COMMIT_SHA=$COMMIT_SHA GIT_BRANCH=$GIT_BRANCH
+
 # node:18-alpine ships an unprivileged `node` user (uid 1000). Run as it, and
 # own the app directory so nothing needs to write as root at runtime.
 RUN chown -R node:node /app

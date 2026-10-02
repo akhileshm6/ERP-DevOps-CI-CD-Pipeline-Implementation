@@ -1,4 +1,5 @@
-const { sales, inventory, hr, finance } = require('../seed');
+// Datasets come from the active store (Postgres, or seed.js in memory mode).
+const { metricsSource } = require('../db/repositories');
 
 const RANGE_DAYS = {
 	today: 1,
@@ -22,9 +23,9 @@ function inRange(date, rangeStart) {
 	return new Date(date) >= rangeStart;
 }
 
-function getSalesMetrics(range = '30d') {
+async function getSalesMetrics(range = '30d') {
 	const rangeStart = getRangeStart(range);
-	const rows = (sales || []).filter((sale) => inRange(sale.createdAt, rangeStart));
+	const rows = (await metricsSource.sales()).filter((sale) => inRange(sale.createdAt, rangeStart));
 	const totalRevenue = rows.reduce((sum, sale) => sum + (sale.totalAmount || 0), 0);
 	const completedOrders = rows.filter((sale) => sale.status === 'Completed').length;
 	const pendingOrders = rows.filter((sale) => sale.status === 'Pending').length;
@@ -42,9 +43,9 @@ function getSalesMetrics(range = '30d') {
 	};
 }
 
-function getInventoryMetrics(range = '30d') {
+async function getInventoryMetrics(range = '30d') {
 	const rangeStart = getRangeStart(range);
-	const rows = (inventory || []).filter((item) => inRange(item.createdAt, rangeStart));
+	const rows = (await metricsSource.inventory()).filter((item) => inRange(item.createdAt, rangeStart));
 	const lowStockItems = rows.filter((item) => item.quantity <= item.minStockLevel);
 	const stockValue = rows.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
 	const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0);
@@ -61,9 +62,9 @@ function getInventoryMetrics(range = '30d') {
 	};
 }
 
-function getHrMetrics(range = '30d') {
+async function getHrMetrics(range = '30d') {
 	const rangeStart = getRangeStart(range);
-	const rows = (hr || []).filter((emp) => inRange(emp.createdAt, rangeStart));
+	const rows = (await metricsSource.hr()).filter((emp) => inRange(emp.createdAt, rangeStart));
 	const activeEmployees = rows.filter((emp) => emp.status === 'Active');
 	const totalSalary = rows.reduce((sum, emp) => sum + (emp.salary || 0), 0);
 	const totalRating = rows.reduce((sum, emp) => sum + (emp.performanceRating || 0), 0);
@@ -82,9 +83,9 @@ function getHrMetrics(range = '30d') {
 	};
 }
 
-function getFinanceMetrics(range = '30d') {
+async function getFinanceMetrics(range = '30d') {
 	const rangeStart = getRangeStart(range);
-	const rows = (finance || []).filter((tx) => inRange(tx.createdAt, rangeStart));
+	const rows = (await metricsSource.finance()).filter((tx) => inRange(tx.createdAt, rangeStart));
 	const revenues = rows.filter((tx) => tx.transactionType === 'Revenue');
 	const expenses = rows.filter((tx) => tx.transactionType === 'Expense');
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/pool');
+const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 
 // GET /api/deployments/current
 router.get('/current', async (req, res) => {
@@ -19,10 +20,10 @@ router.get('/current', async (req, res) => {
 });
 
 // GET /api/deployments (Paginated history)
-router.get('/', async (req, res) => {
+router.get('/', authenticateToken, authorizeRoles('Admin', 'Manager'), async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
     const offset = (page - 1) * limit;
 
     const { rows } = await db.query(

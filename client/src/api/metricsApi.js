@@ -1,45 +1,27 @@
-const API_BASE = process.env.REACT_APP_API_URL || '';
+import { apiRequest } from './client';
 
-export async function fetchSalesMetrics(range = '30d') {
-  const res = await fetch(`${API_BASE}/api/metrics/sales?range=${encodeURIComponent(range)}`);
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Failed to fetch sales metrics (${res.status})`);
-  }
-  return res.json();
+const metricsPath = (domain, range) => `/api/metrics/${domain}?range=${encodeURIComponent(range)}`;
+
+export function fetchSalesMetrics(range = '30d') {
+  return apiRequest(metricsPath('sales', range), { errorMessage: 'Failed to fetch sales metrics' });
 }
 
-export async function fetchInventoryMetrics(range = '30d') {
-  const res = await fetch(`${API_BASE}/api/metrics/inventory?range=${encodeURIComponent(range)}`);
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Failed to fetch inventory metrics (${res.status})`);
-  }
-  return res.json();
+export function fetchInventoryMetrics(range = '30d') {
+  return apiRequest(metricsPath('inventory', range), { errorMessage: 'Failed to fetch inventory metrics' });
 }
 
-export async function fetchHrMetrics(range = '30d') {
-  const res = await fetch(`${API_BASE}/api/metrics/hr?range=${encodeURIComponent(range)}`);
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Failed to fetch HR metrics (${res.status})`);
-  }
-  return res.json();
+export function fetchHrMetrics(range = '30d') {
+  return apiRequest(metricsPath('hr', range), { errorMessage: 'Failed to fetch HR metrics' });
 }
 
-export async function fetchFinanceMetrics(range = '30d') {
-  const res = await fetch(`${API_BASE}/api/metrics/finance?range=${encodeURIComponent(range)}`);
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Failed to fetch finance metrics (${res.status})`);
-  }
-  return res.json();
+export function fetchFinanceMetrics(range = '30d') {
+  return apiRequest(metricsPath('finance', range), { errorMessage: 'Failed to fetch finance metrics' });
 }
 
 export async function fetchSystemStatus() {
-  const res = await fetch(`${API_BASE}/api/metrics`);
-  if (!res.ok) {
+  try {
+    return await apiRequest('/api/metrics', { errorMessage: 'Failed to fetch system status' });
+  } catch {
     return { status: 'DEGRADED', uptime: 'N/A' };
   }
-  return res.json();
 }

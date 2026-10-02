@@ -91,6 +91,21 @@ router.get('/evaluate', authenticateToken, async (req, res) => {
 });
 
 /**
+ * GET /api/flags — every flag with its full configuration, for the Admin console.
+ */
+router.get('/', authenticateToken, authorizeRoles('Admin'), async (req, res) => {
+    try {
+        const { rows } = await db.query(
+            `SELECT key, description, enabled, rollout_percent, target_roles, environment, updated_by, updated_at
+               FROM feature_flags ORDER BY key`
+        );
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Unable to list flags', detail: err.message });
+    }
+});
+
+/**
  * PATCH /api/flags/:key — Admin-only flag mutation.
  * Body: { enabled?, rolloutPercent?, targetRoles? }. Omitted fields keep their value.
  */

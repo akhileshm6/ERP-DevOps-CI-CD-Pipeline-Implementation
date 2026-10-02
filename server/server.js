@@ -13,7 +13,9 @@ const invoiceRoutes = require('./routes/invoices');
 const reportRoutes = require('./routes/reports');
 const metricsRoutes = require('./routes/metrics');
 const flagRoutes = require('./routes/flags');   // Vivek — Phase 6
-const deploymentsRoutes = require('./routes/deployments');   // Akhilesh — deployment history
+const deploymentsRoutes = require('./routes/deployments');
+const { usersRepository } = require('./db/repositories');
+const { bootstrap } = require('./db/bootstrap');   // Akhilesh — deployment history
 const promClient = require('prom-client');
 
 const normalizeRole = (role) => {
@@ -102,47 +104,70 @@ app.get('/ready', async (req, res) => {
 });
 
 // Mock user storage
-const registeredUsers = [];
-
 // --- Auth Routes (Week 7) ---
+// Accounts live in the users table (in memory under Jest). Self-registration
+// always creates an Employee: only a signed-in Admin may grant a higher role,
+// otherwise anyone could register themselves as Admin.
+const isAdminCaller = (req) => {
+    const token = (req.headers['authorization'] || '').split(' ')[1];
+    if (!token) return false;
+    try {
+        return normalizeRole(jwt.verify(token, SECRET).role) === 'Admin';
+    } catch (err) {
+        return false;
+    }
+};
+
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { name, email, password, role } = req.body;
+        const { name, email, password, role } = req.body || {};
+        if (typeof name !== 'string' || !name.trim() || typeof email !== 'string' || !/^\S+@\S+\.\S+$/.test(email)
+            || typeof password !== 'string' || password.length < 8) {
+            return res.status(400).json({ error: 'name, a valid email and a password of at least 8 characters are required' });
+        }
 
-        const existingUser = registeredUsers.find(u => u.email === email);
-        if (existingUser) {
+        const requestedRole = normalizeRole(role);
+        if (requestedRole !== 'Employee' && !isAdminCaller(req)) {
+            return res.status(403).json({ error: 'Only an Admin can assign the Admin or Manager role' });
+        }
+
+        const normalizedEmail = email.trim().toLowerCase();
+        if (await usersRepository.findByEmail(normalizedEmail)) {
             return res.status(400).json({ error: 'User already exists' });
         }
 
-        const normalizedRole = normalizeRole(role);
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = { id: registeredUsers.length + 1, name, email, password: hashedPassword, role: normalizedRole };
-        registeredUsers.push(newUser);
+        const passwordHash = await bcrypt.hash(password, 10);
+        const newUser = await usersRepository.create({ name: name.trim(), email: normalizedEmail, passwordHash, role: requestedRole });
 
         res.status(201).json({ message: 'User registered successfully', userId: newUser.id });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[auth] register failed:', err.message);
+        res.status(500).json({ error: 'Registration failed' });
     }
 });
 
 app.post('/api/auth/login', async (req, res) => {
     try {
-        const { email, password } = req.body;
-        const user = registeredUsers.find(u => u.email === email);
+        const { email, password } = req.body || {};
+        if (typeof email !== 'string' || typeof password !== 'string') {
+            return res.status(400).json({ error: 'email and password are required' });
+        }
 
-        if (!user || !(await bcrypt.compare(password, user.password))) {
+        const user = await usersRepository.findByEmail(email.trim().toLowerCase());
+        if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         const token = jwt.sign(
-            { id: user.id, role: user.role },
+            { id: user.id, role: user.role, name: user.name },
             SECRET,
             { expiresIn: '8h' }
         );
 
-        res.status(200).json({ token, role: user.role });
+        res.status(200).json({ token, role: user.role, name: user.name });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[auth] login failed:', err.message);
+        res.status(500).json({ error: 'Login failed' });
     }
 });
 
@@ -187,11 +212,29 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
+// Seed demo accounts/data, retrying while the database comes up. The server
+// listens regardless: /ready reports 503 until the database is reachable.
+const bootstrapWithRetry = async (attempts = 10) => {
+    for (let i = 1; i <= attempts; i += 1) {
+        try {
+            await bootstrap();
+            return;
+        } catch (err) {
+            console.error(`[bootstrap] attempt ${i}/${attempts} failed: ${err.message}`);
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+    }
+    console.error('[bootstrap] giving up; demo users/data were not created');
+};
+
 // Only listen when executed directly (allows supertest in Jest)
 if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`Server running on port ${PORT}`);
+        bootstrapWithRetry();
     });
 }
+
+app.bootstrap = bootstrap;
 
 module.exports = app;

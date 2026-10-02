@@ -111,6 +111,11 @@ jobs:
         with:
           context: ./server
           push: true
+          # Stamped into the image so GET /api/deployments/current reports what is running.
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}-${{ github.run_number }}
+            COMMIT_SHA=${{ github.sha }}
+            GIT_BRANCH=${{ github.ref_name }}
           tags: |
             ghcr.io/${{ steps.owner.outputs.name }}/erp-server:${{ github.sha }}
             ghcr.io/${{ steps.owner.outputs.name }}/erp-server:latest
@@ -217,3 +222,30 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' "${{ secrets.APP_BASE_URL }}/ready" || echo 000)
           echo "production /ready -> HTTP $code"
           [ "$code" = "200" ] || { echo "Smoke test failed; rollback should fire." >&2; exit 1; }
+
+      # Record the outcome in deployment history (POST /api/deployments).
+      # Runs on failure too, so failed deploys show up on the dashboard.
+      - name: Record deployment outcome
+        if: always()
+        env:
+          STATUS: ${{ job.status == 'success' && 'success' || 'failed' }}
+        run: |
+          if [ -z "${{ secrets.DEPLOY_API_TOKEN }}" ]; then
+            echo "DEPLOY_API_TOKEN not set; skipping deployment record." >&2
+            exit 0
+          fi
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          body=$(jq -n \
+            --arg version "${{ github.ref_name }}-${{ github.run_number }}" \
+            --arg tag "ghcr.io/$owner/erp-server:${{ github.sha }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg by "${{ github.actor }}" \
+            --arg status "$STATUS" \
+            --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{version: $version, imageTag: $tag, commitSha: $sha, environment: "production",
+              status: $status, triggeredBy: $by, triggerType: "automated",
+              testSummary: {run: $run}}')
+          curl -fsS -X POST "${{ secrets.APP_BASE_URL }}/api/deployments" \
+            -H 'Content-Type: application/json' \
+            -H "X-Deploy-Token: ${{ secrets.DEPLOY_API_TOKEN }}" \
+            -d "$body" || echo "Could not record deployment (non-fatal)." >&2

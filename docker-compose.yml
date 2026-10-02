@@ -41,6 +41,7 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
       APP_VERSION: ${APP_VERSION:-dev}
       COMMIT_SHA: ${COMMIT_SHA:-local}
+      DEPLOY_API_TOKEN: ${DEPLOY_API_TOKEN:-local_deploy_token}
     ports:
       - "${SERVER_PORT:-5000}:5000"
     depends_on:
