@@ -23,15 +23,32 @@ jobs:
           cd server
           npm ci
 
-      - name: Run Security Audit
+      # Enforced: fails the build on any high/critical advisory in the API's
+      # runtime dependencies (the code that actually ships).
+      - name: Run Security Audit (server runtime dependencies)
         run: |
           cd server
-          npm run audit || true
+          npm audit --omit=dev --audit-level=high
 
       - name: Run Backend Unit Tests
         run: |
           cd server
           npm test
+
+      - name: Install Client Dependencies
+        run: |
+          cd client
+          npm ci
+
+      - name: Run Client Tests
+        run: |
+          cd client
+          CI=true npx react-scripts test --watchAll=false
+
+      - name: Build Client (production)
+        run: |
+          cd client
+          CI=true npx react-scripts build
 
   publish-and-deploy:
     needs: quality-and-test
