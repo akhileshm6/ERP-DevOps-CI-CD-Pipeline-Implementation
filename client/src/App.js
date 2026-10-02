@@ -1,21 +1,18 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
-import { Activity, Boxes, BriefcaseBusiness, DollarSign, Flag, GitCommitHorizontal, LayoutDashboard, LogOut, Users } from 'lucide-react';
-import {
-  fetchFinanceMetrics,
-  fetchHrMetrics,
-  fetchInventoryMetrics,
-  fetchSalesMetrics
-} from './api/metricsApi';
-import { fetchCurrentDeployment, fetchDeployments } from './api/deploymentsApi';
+import { fetchFinanceMetrics, fetchHrMetrics, fetchInventoryMetrics, fetchSalesMetrics } from './api/metricsApi';
 import { getSessionFromToken, LOGOUT_EVENT, logout } from './api/client';
+import { useHashTab } from './hooks/useHashTab';
+import { useStatus } from './hooks/useStatus';
 import { LoginForm } from './components/auth/LoginForm';
-import { WidgetEmpty, WidgetError } from './components/common/WidgetStates';
+import { AppHeader } from './components/layout/AppHeader';
+import { TabNav } from './components/layout/TabNav';
+import { Overview } from './components/overview/Overview';
 import { SalesSection } from './components/sections/SalesSection';
 import { InventorySection } from './components/sections/InventorySection';
 import { HRSection } from './components/sections/HRSection';
 import { FinanceSection } from './components/sections/FinanceSection';
-import { DeploymentHistoryTable } from './components/deployments/DeploymentHistoryTable';
+import { DeploymentsView } from './components/deployments/DeploymentsView';
 import { FeatureFlagConsole } from './components/admin/FeatureFlagConsole';
 
 const queryClient = new QueryClient({
@@ -24,120 +21,86 @@ const queryClient = new QueryClient({
   }
 });
 
-const DEPLOYMENT_FETCH_LIMIT = 50;
+const IS_DEVELOPMENT = process.env.NODE_ENV === 'development';
+const INVENTORY_RANGE = '30d'; // the inventory API returns a snapshot and ignores the range
 
-const dashboardViews = {
-  Admin: {
-    description: 'Full business overview and deployment controls.',
-    domains: ['sales', 'inventory', 'hr', 'finance'],
-    showDeploymentHistory: true
-  },
-  Manager: {
-    description: 'Business performance and release oversight.',
-    domains: ['sales', 'inventory', 'hr', 'finance'],
-    showDeploymentHistory: true
-  },
-  User: {
-    description: 'Sales and inventory overview.',
-    domains: ['sales', 'inventory'],
-    showDeploymentHistory: false
-  }
-};
+const ALL_TABS = [
+  { id: 'overview', label: 'Overview', roles: ['Admin', 'Manager', 'User'] },
+  { id: 'sales', label: 'Sales', roles: ['Admin', 'Manager', 'User'] },
+  { id: 'inventory', label: 'Inventory', roles: ['Admin', 'Manager', 'User'] },
+  { id: 'people', label: 'People', roles: ['Admin', 'Manager'] },
+  { id: 'finance', label: 'Finance', roles: ['Admin', 'Manager'] },
+  { id: 'deployments', label: 'Deployments', roles: ['Admin', 'Manager'] },
+  { id: 'flags', label: 'Feature flags', roles: ['Admin'] }
+];
 
-function DeploymentHistoryPanel({ userRole }) {
-  const deploymentsQuery = useQuery({
-    queryKey: ['deployments', 1, DEPLOYMENT_FETCH_LIMIT],
-    queryFn: () => fetchDeployments({ page: 1, limit: DEPLOYMENT_FETCH_LIMIT })
+function SalesTab({ range, onRangeChange }) {
+  const [simulateError, setSimulateError] = useState(false);
+  const query = useQuery({
+    queryKey: ['metrics', 'sales', range, simulateError],
+    queryFn: () => (simulateError ? Promise.reject(new Error('Simulated Sales API failure (developer tool).')) : fetchSalesMetrics(range))
   });
+  const devTools = IS_DEVELOPMENT ? (
+    <div className="dev-tools">
+      <span className="field-label">Developer tool (development builds only)</span>
+      <button type="button" className="btn btn-small" aria-pressed={simulateError} onClick={() => setSimulateError((current) => !current)}>
+        {simulateError ? 'Stop simulating Sales API failure' : 'Simulate Sales API failure'}
+      </button>
+    </div>
+  ) : null;
+  return <SalesSection queryState={query} range={range} onRangeChange={onRangeChange} devTools={devTools} />;
+}
 
-  if (deploymentsQuery.isError) {
-    return <section className="deployment-history"><WidgetError title="Deployment history unavailable" error={deploymentsQuery.error} onRetry={() => deploymentsQuery.refetch()} /></section>;
-  }
-  const deployments = deploymentsQuery.data?.data || [];
-  if (deploymentsQuery.isSuccess && deployments.length === 0) {
-    return <section className="deployment-history"><WidgetEmpty title="No deployments yet" message="New releases will appear here once the pipeline records them." /></section>;
-  }
-  return <DeploymentHistoryTable deployments={deployments} userRole={userRole} isLoading={deploymentsQuery.isLoading} onRollback={(deployment) => window.alert(`Rollback for ${deployment.version} in ${deployment.environment} is run from the manual rollback workflow in CI.`)} />;
+function InventoryTab() {
+  const query = useQuery({ queryKey: ['metrics', 'inventory'], queryFn: () => fetchInventoryMetrics(INVENTORY_RANGE) });
+  return <InventorySection queryState={query} />;
+}
+
+function PeopleTab({ range, onRangeChange }) {
+  const query = useQuery({ queryKey: ['metrics', 'hr', range], queryFn: () => fetchHrMetrics(range) });
+  return <HRSection queryState={query} range={range} onRangeChange={onRangeChange} />;
+}
+
+function FinanceTab({ range, onRangeChange }) {
+  const query = useQuery({ queryKey: ['metrics', 'finance', range], queryFn: () => fetchFinanceMetrics(range) });
+  return <FinanceSection queryState={query} range={range} onRangeChange={onRangeChange} />;
 }
 
 function Dashboard({ session, onLogout }) {
-  const [ranges, setRanges] = useState({ sales: '30d', inventory: '30d', hr: '30d', finance: '30d' });
-  const [activeDomain, setActiveDomain] = useState('all');
-  const [activeAdminView, setActiveAdminView] = useState('overview');
-  const [simulateSalesError, setSimulateSalesError] = useState(false);
   const userRole = session.role;
-  const dashboardView = dashboardViews[userRole];
-
-  const salesQuery = useQuery({
-    queryKey: ['metrics', 'sales', ranges.sales, simulateSalesError],
-    queryFn: () => {
-      if (simulateSalesError) return Promise.reject(new Error('Sales API failure simulation is enabled.'));
-      return fetchSalesMetrics(ranges.sales);
-    }
-  });
-  const inventoryQuery = useQuery({
-    queryKey: ['metrics', 'inventory', ranges.inventory],
-    queryFn: () => fetchInventoryMetrics(ranges.inventory)
-  });
-  const hrQuery = useQuery({
-    queryKey: ['metrics', 'hr', ranges.hr],
-    queryFn: () => fetchHrMetrics(ranges.hr),
-    enabled: userRole !== 'User'
-  });
-  const financeQuery = useQuery({
-    queryKey: ['metrics', 'finance', ranges.finance],
-    queryFn: () => fetchFinanceMetrics(ranges.finance),
-    enabled: userRole !== 'User'
-  });
-
-  const currentDeploymentQuery = useQuery({ queryKey: ['deployments', 'current'], queryFn: fetchCurrentDeployment });
-  const currentVersion = currentDeploymentQuery.data?.version;
-
+  const tabs = useMemo(() => ALL_TABS.filter((tab) => tab.roles.includes(userRole)), [userRole]);
+  const tabIds = useMemo(() => tabs.map((tab) => tab.id), [tabs]);
+  const activeTab = useHashTab(tabIds, 'overview');
+  const [ranges, setRanges] = useState({ sales: '30d', hr: '30d', finance: '30d' });
   const setRange = (domain) => (range) => setRanges((current) => ({ ...current, [domain]: range }));
-  const domains = [
-    { id: 'sales', label: 'Sales', Icon: DollarSign, section: <SalesSection queryState={salesQuery} range={ranges.sales} onRangeChange={setRange('sales')} isSimulatingError={simulateSalesError} onToggleSimulateError={() => setSimulateSalesError((current) => !current)} /> },
-    { id: 'inventory', label: 'Inventory', Icon: Boxes, section: <InventorySection queryState={inventoryQuery} range={ranges.inventory} onRangeChange={setRange('inventory')} /> },
-    { id: 'hr', label: 'HR', Icon: Users, section: <HRSection queryState={hrQuery} range={ranges.hr} onRangeChange={setRange('hr')} /> },
-    { id: 'finance', label: 'Finance', Icon: BriefcaseBusiness, section: <FinanceSection queryState={financeQuery} range={ranges.finance} onRangeChange={setRange('finance')} /> }
-  ];
-  const visibleDomains = domains.filter(({ id }) => dashboardView.domains.includes(id));
+  const statusQuery = useStatus();
+  const isManager = userRole === 'Admin' || userRole === 'Manager';
+  const activeLabel = tabs.find((tab) => tab.id === activeTab)?.label;
+
+  useEffect(() => {
+    document.title = activeLabel ? `${activeLabel} · SP301 ERP` : 'SP301 ERP';
+  }, [activeLabel]);
+
+  let content;
+  switch (activeTab) {
+    case 'sales': content = <SalesTab range={ranges.sales} onRangeChange={setRange('sales')} />; break;
+    case 'inventory': content = <InventoryTab />; break;
+    case 'people': content = <PeopleTab range={ranges.hr} onRangeChange={setRange('hr')} />; break;
+    case 'finance': content = <FinanceTab range={ranges.finance} onRangeChange={setRange('finance')} />; break;
+    case 'deployments': content = <DeploymentsView userRole={userRole} />; break;
+    case 'flags': content = <FeatureFlagConsole />; break;
+    default: content = <Overview isManager={isManager} statusQuery={statusQuery} />;
+  }
 
   return (
-    <main className="dashboard-container">
-      <header className="dashboard-header">
-        <div className="brand-section">
-          <div className="brand-logo"><LayoutDashboard size={24} /></div>
-          <div className="brand-info">
-            <h1>ERP Metrics Dashboard</h1>
-            <p>{userRole === 'Admin' && activeAdminView === 'flags' ? 'Manage rollout and role targeting for dashboard features.' : dashboardView.description}</p>
-          </div>
-        </div>
-        <div className="header-actions">
-          {currentVersion && <span className="current-version-pill" title={[currentDeploymentQuery.data.environment, currentDeploymentQuery.data.commitSha, currentDeploymentQuery.data.deployedAt].filter(Boolean).join(' · ')}><GitCommitHorizontal size={13} aria-hidden="true" /> {currentVersion}</span>}
-          <span className="status-pill"><span className="status-dot" /> Live metrics</span>
-          <span className="user-chip"><strong>{session.name || 'Signed in'}</strong><span className="user-role-badge">{userRole}</span></span>
-          <button type="button" className="btn-secondary" onClick={onLogout}><LogOut size={14} aria-hidden="true" /> Log out</button>
-        </div>
-      </header>
-
-      {userRole === 'Admin' && <nav className="dashboard-view-tabs" aria-label="Admin dashboard views">
-        <button type="button" className={activeAdminView === 'overview' ? 'active' : ''} aria-current={activeAdminView === 'overview' ? 'page' : undefined} onClick={() => setActiveAdminView('overview')}><LayoutDashboard size={15} /> Overview</button>
-        <button type="button" className={activeAdminView === 'flags' ? 'active' : ''} aria-current={activeAdminView === 'flags' ? 'page' : undefined} onClick={() => setActiveAdminView('flags')}><Flag size={15} /> Feature flags</button>
-      </nav>}
-
-      {userRole === 'Admin' && activeAdminView === 'flags' ? <FeatureFlagConsole /> : <>
-        <nav className="domain-filter-bar" aria-label="Dashboard domains">
-          <button className={`domain-pill-btn ${activeDomain === 'all' ? 'active-all' : ''}`} onClick={() => setActiveDomain('all')}><Activity size={15} /> All domains</button>
-          {visibleDomains.map(({ id, label, Icon }) => <button key={id} className={`domain-pill-btn ${activeDomain === id ? `active-${id}` : ''}`} onClick={() => setActiveDomain(id)}><Icon size={15} /> {label}</button>)}
-        </nav>
-
-        <section className="dashboard-grid" aria-label="Business metrics">
-          {visibleDomains.filter(({ id }) => activeDomain === 'all' || activeDomain === id).map(({ id, section }) => <React.Fragment key={id}>{section}</React.Fragment>)}
-        </section>
-
-        {dashboardView.showDeploymentHistory && <DeploymentHistoryPanel userRole={userRole} />}
-      </>}
-    </main>
+    <div className="app">
+      <a className="skip-link" href="#main-content">Skip to content</a>
+      <AppHeader session={session} statusQuery={statusQuery} onLogout={onLogout} />
+      <TabNav tabs={tabs} activeTab={activeTab} />
+      <main id="main-content" className="app-main" tabIndex={-1} aria-label={activeLabel}>
+        {content}
+      </main>
+    </div>
   );
 }
 

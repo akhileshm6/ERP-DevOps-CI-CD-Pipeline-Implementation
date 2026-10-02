@@ -17,11 +17,3 @@ export function fetchHrMetrics(range = '30d') {
 export function fetchFinanceMetrics(range = '30d') {
   return apiRequest(metricsPath('finance', range), { errorMessage: 'Failed to fetch finance metrics' });
 }
-
-export async function fetchSystemStatus() {
-  try {
-    return await apiRequest('/api/metrics', { errorMessage: 'Failed to fetch system status' });
-  } catch {
-    return { status: 'DEGRADED', uptime: 'N/A' };
-  }
-}

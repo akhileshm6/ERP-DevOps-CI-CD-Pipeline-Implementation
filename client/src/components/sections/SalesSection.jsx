@@ -1,107 +1,48 @@
-import React from 'react';
-import { ShoppingBag, DollarSign, TrendingUp, RefreshCw, ZapOff } from 'lucide-react';
-import { KpiCard } from '../common/KpiCard';
-import { WidgetSkeleton, WidgetError, WidgetEmpty } from '../common/WidgetStates';
+import React, { useMemo } from 'react';
+import { KpiStrip } from '../common/KpiStrip';
+import { DataTable } from '../common/DataTable';
+import { RangeSelector } from '../common/RangeSelector';
+import { SectionHeader } from '../common/SectionHeader';
+import { StatusBadge, salesStatusTone } from '../common/StatusBadge';
+import { WidgetEmpty, WidgetError, WidgetSkeleton } from '../common/WidgetStates';
 import { SalesChart } from '../charts/SalesChart';
+import { formatCurrency, formatCurrencyPrecise, formatDateTime, formatNumber, formatPeriodChange, rangePeriod } from '../../utils/format';
 
-export function SalesSection({
-  queryState,
-  range,
-  onRangeChange,
-  isSimulatingError,
-  onToggleSimulateError
-}) {
+const columns = [
+  { key: 'clientName', header: 'Client' },
+  { key: 'totalAmount', header: 'Amount', align: 'right', render: (row) => formatCurrencyPrecise(row.totalAmount) },
+  { key: 'status', header: 'Status', render: (row) => <StatusBadge tone={salesStatusTone(row.status)}>{row.status || 'Unknown'}</StatusBadge> },
+  { key: 'createdAt', header: 'Date', render: (row) => <span className="num">{formatDateTime(row.createdAt)}</span> }
+];
+
+export function SalesSection({ queryState, range, onRangeChange, devTools = null }) {
   const { data, isLoading, isError, error, refetch, isFetching } = queryState;
-
   const summary = data?.summary;
-  const items = data?.data || [];
+  const items = useMemo(() => data?.data || [], [data]);
+  const recent = useMemo(() => [...items].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)), [items]);
+  const period = rangePeriod(range);
+  const trend = summary ? formatPeriodChange(summary.totalRevenue, summary.previousPeriodRevenue) : null;
 
   return (
-    <div className="domain-section sales">
-      <div className="section-header">
-        <div className="section-title-wrap">
-          <div className="domain-icon-badge sales">
-            <DollarSign size={20} />
-          </div>
-          <div>
-            <h2 className="section-title">Sales & Revenue Velocity</h2>
-            <p className="section-subtitle">Real-time order pipeline and gross billing metrics</p>
-          </div>
-        </div>
+    <section className="section" aria-labelledby="sales-title">
+      <SectionHeader id="sales-title" title="Sales" description="Orders and revenue for the selected period." onRefresh={refetch} isFetching={isFetching}>
+        <RangeSelector value={range} onChange={onRangeChange} label="Sales period" />
+      </SectionHeader>
 
-        <div className="section-actions">
-          <div className="range-tabs">
-            {['today', '7d', '30d', 'quarter'].map((r) => (
-              <button
-                key={r}
-                className={`range-tab-btn ${range === r ? 'active' : ''}`}
-                onClick={() => onRangeChange(r)}
-              >
-                {r === 'quarter' ? '90D' : r.toUpperCase()}
-              </button>
-            ))}
-          </div>
-
-          <button
-            className={`icon-btn ${isSimulatingError ? 'active-error-sim' : ''}`}
-            onClick={onToggleSimulateError}
-            title={isSimulatingError ? 'Disable Error Simulation' : 'Simulate Sales API Failure (Test Widget Isolation)'}
-          >
-            <ZapOff size={15} />
-          </button>
-
-          <button
-            className="icon-btn"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            title="Refresh Sales Data"
-          >
-            <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} />
-          </button>
-        </div>
-      </div>
-
-      {isLoading ? (
-        <WidgetSkeleton />
-      ) : isError ? (
-        <WidgetError error={error} onRetry={() => refetch()} title="Sales Metrics Offline" />
-      ) : items.length === 0 ? (
-        <WidgetEmpty title="No Sales Records" message="No sales orders were registered in this time period." />
-      ) : (
-        <>
-          <div className="kpi-row">
-            <KpiCard
-              title="Total Revenue"
-              value={`$${(summary?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
-              badgeText="+14.2%"
-              badgeType="positive"
-              icon={DollarSign}
-            />
-            <KpiCard
-              title="Total Orders"
-              value={summary?.orderCount || 0}
-              subtitle="Processed orders"
-              icon={ShoppingBag}
-            />
-            <KpiCard
-              title="Avg Order Value"
-              value={`$${(summary?.averageOrderValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
-              badgeText="AOV"
-              badgeType="positive"
-              icon={TrendingUp}
-            />
-            <KpiCard
-              title="Completed Orders"
-              value={summary?.completedOrders || 0}
-              subtitle={`${summary?.pendingOrders || 0} pending fulfillment`}
-              badgeText={summary?.pendingOrders > 0 ? `${summary.pendingOrders} Pending` : 'All Done'}
-              badgeType={summary?.pendingOrders > 0 ? 'warning' : 'positive'}
-            />
-          </div>
-
+      {isLoading ? <WidgetSkeleton label="Loading sales" />
+        : isError ? <WidgetError error={error} onRetry={refetch} title="Sales data unavailable" />
+        : items.length === 0 ? <WidgetEmpty title="No sales orders" message="No orders were recorded in this period." />
+        : <>
+          <KpiStrip label="Sales figures" items={[
+            { label: 'Revenue', value: formatCurrency(summary?.totalRevenue), period, note: trend || 'No prior-period data' },
+            { label: 'Orders', value: formatNumber(summary?.orderCount), period },
+            { label: 'Average order', value: formatCurrencyPrecise(summary?.averageOrderValue), period },
+            { label: 'Completed', value: formatNumber(summary?.completedOrders), period, note: `${formatNumber(summary?.pendingOrders)} pending, ${formatNumber(summary?.refundedOrders)} refunded` }
+          ]} />
           <SalesChart data={items} />
-        </>
-      )}
-    </div>
+          <DataTable caption="Recent orders" columns={columns} rows={recent} />
+        </>}
+      {devTools}
+    </section>
   );
 }

@@ -1,18 +1,46 @@
-import React from 'react';
-import { BadgeCheck, Building2, RefreshCw, Star, Users } from 'lucide-react';
-import { HRChart } from '../charts/HRChart';
-import { KpiCard } from '../common/KpiCard';
+import React, { useMemo } from 'react';
+import { KpiStrip } from '../common/KpiStrip';
+import { DataTable } from '../common/DataTable';
+import { RangeSelector } from '../common/RangeSelector';
+import { SectionHeader } from '../common/SectionHeader';
+import { StatusBadge } from '../common/StatusBadge';
 import { WidgetEmpty, WidgetError, WidgetSkeleton } from '../common/WidgetStates';
+import { HRChart } from '../charts/HRChart';
+import { formatCurrency, formatDate, formatNumber, rangePeriod } from '../../utils/format';
 
-const ranges = ['today', '7d', '30d', 'quarter'];
+const columns = [
+  { key: 'name', header: 'Name' },
+  { key: 'department', header: 'Department' },
+  { key: 'role', header: 'Role' },
+  { key: 'status', header: 'Status', render: (row) => <StatusBadge tone={row.status === 'Active' ? 'success' : 'neutral'}>{row.status || 'Unknown'}</StatusBadge> },
+  { key: 'hireDate', header: 'Hire date', render: (row) => <span className="num">{formatDate(row.hireDate)}</span> }
+];
 
 export function HRSection({ queryState, range, onRangeChange }) {
   const { data, isLoading, isError, error, refetch, isFetching } = queryState;
   const summary = data?.summary;
-  const items = data?.data || [];
+  const people = useMemo(() => [...(data?.data || [])].sort((a, b) => String(a.name).localeCompare(String(b.name))), [data]);
 
-  return <section className="domain-section hr">
-    <div className="section-header"><div className="section-title-wrap"><div className="domain-icon-badge hr"><Users size={20} /></div><div><h2 className="section-title">People & Performance</h2><p className="section-subtitle">Workforce capacity, compensation, and performance indicators</p></div></div><div className="section-actions"><div className="range-tabs">{ranges.map((item) => <button key={item} className={`range-tab-btn ${range === item ? 'active' : ''}`} onClick={() => onRangeChange(item)}>{item === 'quarter' ? '90D' : item.toUpperCase()}</button>)}</div><button className="icon-btn" onClick={() => refetch()} disabled={isFetching} title="Refresh HR data"><RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} /></button></div></div>
-    {isLoading ? <WidgetSkeleton /> : isError ? <WidgetError error={error} onRetry={refetch} title="HR Metrics Offline" /> : items.length === 0 ? <WidgetEmpty title="No Employee Records" message="No employee records were created in this time period." /> : <><div className="kpi-row"><KpiCard title="Team Members" value={summary?.totalEmployees || 0} subtitle="In selected period" icon={Users} /><KpiCard title="Active Employees" value={summary?.activeCount || 0} badgeText={`${summary?.totalEmployees ? Math.round((summary.activeCount / summary.totalEmployees) * 100) : 0}% active`} badgeType="positive" icon={BadgeCheck} /><KpiCard title="Average Salary" value={`$${Number(summary?.averageSalary || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={Building2} /><KpiCard title="Performance" value={`${Number(summary?.avgPerformance || 0).toFixed(1)} / 5`} subtitle={`${summary?.departmentCount || 0} departments`} icon={Star} /></div><HRChart data={items} /></>}
-  </section>;
+  return (
+    <section className="section" aria-labelledby="people-title">
+      <SectionHeader id="people-title" title="People" description="Current headcount by department. The period applies to new hires only." onRefresh={refetch} isFetching={isFetching}>
+        <RangeSelector value={range} onChange={onRangeChange} label="New hires period" />
+      </SectionHeader>
+
+      {isLoading ? <WidgetSkeleton label="Loading people" />
+        : isError ? <WidgetError error={error} onRetry={refetch} title="People data unavailable" />
+        : people.length === 0 ? <WidgetEmpty title="No employee records" message="No employees are recorded." />
+        : <>
+          <KpiStrip label="People figures" items={[
+            { label: 'Headcount', value: formatNumber(summary?.totalEmployees), period: 'Current', note: `${formatNumber(summary?.departmentCount)} departments` },
+            { label: 'Active', value: formatNumber(summary?.activeCount), period: 'Current', note: `${formatNumber(summary?.onLeaveCount)} on leave` },
+            { label: 'New hires', value: formatNumber(summary?.newHires), period: rangePeriod(range) },
+            { label: 'Average salary', value: formatCurrency(summary?.averageSalary), period: 'Current' },
+            { label: 'Average rating', value: Number(summary?.avgPerformance || 0).toFixed(1), unit: '/ 5', period: 'Current' }
+          ]} />
+          <HRChart data={people} />
+          <DataTable caption="Employees" columns={columns} rows={people} />
+        </>}
+    </section>
+  );
 }

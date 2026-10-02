@@ -1,19 +1,56 @@
-import React from 'react';
-import { AlertTriangle, Boxes, PackageCheck, RefreshCw, WalletCards } from 'lucide-react';
-import { InventoryChart } from '../charts/InventoryChart';
-import { KpiCard } from '../common/KpiCard';
+import React, { useMemo } from 'react';
+import { KpiStrip } from '../common/KpiStrip';
+import { DataTable } from '../common/DataTable';
+import { SectionHeader } from '../common/SectionHeader';
+import { StatusBadge } from '../common/StatusBadge';
 import { WidgetEmpty, WidgetError, WidgetSkeleton } from '../common/WidgetStates';
+import { InventoryChart } from '../charts/InventoryChart';
+import { formatCurrency, formatDateTime, formatNumber } from '../../utils/format';
 
-const ranges = ['today', '7d', '30d', 'quarter'];
-const money = (value) => `$${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+export const isLowStock = (item) => Number(item.quantity) <= Number(item.minStockLevel);
 
-export function InventorySection({ queryState, range, onRangeChange }) {
+/** Low-stock first (largest shortfall first), then by lowest cover ratio. */
+export function sortByStockRisk(items) {
+  return [...items].sort((a, b) => {
+    const lowDiff = Number(isLowStock(b)) - Number(isLowStock(a));
+    if (lowDiff) return lowDiff;
+    if (isLowStock(a)) return (b.minStockLevel - b.quantity) - (a.minStockLevel - a.quantity);
+    return (a.quantity / (a.minStockLevel || 1)) - (b.quantity / (b.minStockLevel || 1));
+  });
+}
+
+const columns = [
+  { key: 'sku', header: 'SKU', render: (row) => <span className="mono">{row.sku}</span> },
+  { key: 'name', header: 'Item' },
+  { key: 'category', header: 'Category' },
+  { key: 'quantity', header: 'On hand', align: 'right', render: (row) => formatNumber(row.quantity) },
+  { key: 'minStockLevel', header: 'Reorder level', align: 'right', render: (row) => formatNumber(row.minStockLevel) },
+  { key: 'status', header: 'Status', render: (row) => (isLowStock(row) ? <StatusBadge tone="danger">Low</StatusBadge> : <StatusBadge tone="success">OK</StatusBadge>) }
+];
+
+export function InventorySection({ queryState }) {
   const { data, isLoading, isError, error, refetch, isFetching } = queryState;
   const summary = data?.summary;
-  const items = data?.data || [];
+  const sorted = useMemo(() => sortByStockRisk(data?.data || []), [data]);
+  const asOf = data?.asOf ? `As of ${formatDateTime(data.asOf)}` : undefined;
 
-  return <section className="domain-section inventory">
-    <div className="section-header"><div className="section-title-wrap"><div className="domain-icon-badge inventory"><Boxes size={20} /></div><div><h2 className="section-title">Inventory Health</h2><p className="section-subtitle">Stock availability, reorder risk, and carrying value</p></div></div><div className="section-actions"><div className="range-tabs">{ranges.map((item) => <button key={item} className={`range-tab-btn ${range === item ? 'active' : ''}`} onClick={() => onRangeChange(item)}>{item === 'quarter' ? '90D' : item.toUpperCase()}</button>)}</div><button className="icon-btn" onClick={() => refetch()} disabled={isFetching} title="Refresh inventory data"><RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} /></button></div></div>
-    {isLoading ? <WidgetSkeleton /> : isError ? <WidgetError error={error} onRetry={refetch} title="Inventory Metrics Offline" /> : items.length === 0 ? <WidgetEmpty title="No Inventory Records" message="No inventory items were recorded in this time period." /> : <><div className="kpi-row"><KpiCard title="Stock Value" value={money(summary?.stockValue)} icon={WalletCards} /><KpiCard title="Items Tracked" value={summary?.itemCount || 0} subtitle="Active SKUs" icon={Boxes} /><KpiCard title="Units on Hand" value={(summary?.totalQuantity || 0).toLocaleString()} subtitle="Across all tracked items" icon={PackageCheck} /><KpiCard title="Low Stock" value={summary?.lowStockCount || 0} badgeText={summary?.lowStockCount ? 'Reorder needed' : 'Healthy'} badgeType={summary?.lowStockCount ? 'alert' : 'positive'} icon={AlertTriangle} /></div><InventoryChart data={items} /></>}
-  </section>;
+  return (
+    <section className="section" aria-labelledby="inventory-title">
+      <SectionHeader id="inventory-title" title="Inventory" description="Current stock on hand and items at or below reorder level." onRefresh={refetch} isFetching={isFetching} />
+
+      {isLoading ? <WidgetSkeleton label="Loading inventory" />
+        : isError ? <WidgetError error={error} onRetry={refetch} title="Inventory data unavailable" />
+        : sorted.length === 0 ? <WidgetEmpty title="No inventory items" message="No stock items are recorded." />
+        : <>
+          <KpiStrip label="Inventory figures" items={[
+            { label: 'Stock value', value: formatCurrency(summary?.stockValue), period: 'Current', note: asOf },
+            { label: 'Items', value: formatNumber(summary?.itemCount), unit: 'SKUs', period: 'Current' },
+            { label: 'Units on hand', value: formatNumber(summary?.totalQuantity), period: 'Current' },
+            { label: 'At or below reorder level', value: formatNumber(summary?.lowStockCount), unit: 'items', period: 'Current' }
+          ]} />
+          <InventoryChart data={sorted} />
+          <DataTable caption="Stock items, low stock first" columns={columns} rows={sorted} />
+        </>}
+    </section>
+  );
 }

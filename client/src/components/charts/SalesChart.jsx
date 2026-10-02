@@ -1,126 +1,40 @@
 import React, { useMemo } from 'react';
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip
-} from 'recharts';
+import { ResponsiveContainer, ComposedChart, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { CHART, ChartFrame, ChartTooltip, axisProps, tooltipCursor } from './chartTheme';
+import { formatCurrencyCompact, formatCurrencyPrecise, formatDayMonth, formatNumber } from '../../utils/format';
 
-function CustomTooltip({ active, payload, label }) {
-  if (active && payload && payload.length) {
-    return (
-      <div className="custom-tooltip">
-        <div className="tooltip-title">{label}</div>
-        <div className="tooltip-row">
-          <span style={{ color: '#10b981' }}>Revenue:</span>
-          <span className="tooltip-value">${Number(payload[0].value).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-        </div>
-        {payload[1] && (
-          <div className="tooltip-row">
-            <span style={{ color: '#06b6d4' }}>Orders:</span>
-            <span className="tooltip-value">{payload[1].value}</span>
-          </div>
-        )}
-      </div>
-    );
-  }
-  return null;
-}
+const salesRows = (point) => [['Revenue', formatCurrencyPrecise(point.revenue)], ['Orders', formatNumber(point.orders)]];
 
 export function SalesChart({ data = [] }) {
-  // Aggregate sales by date
   const chartData = useMemo(() => {
-    if (!data || data.length === 0) return [];
-
-    const dateMap = new Map();
-
-    // Sort chronologically
-    const sorted = [...data].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-    sorted.forEach((item) => {
-      const dateStr = new Date(item.createdAt).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric'
-      });
-
-      if (!dateMap.has(dateStr)) {
-        dateMap.set(dateStr, {
-          date: dateStr,
-          revenue: 0,
-          orders: 0
-        });
-      }
-
-      const entry = dateMap.get(dateStr);
-      entry.revenue += item.totalAmount || 0;
+    const byDay = new Map();
+    [...data].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).forEach((order) => {
+      const day = String(order.createdAt || '').slice(0, 10);
+      if (!day) return;
+      if (!byDay.has(day)) byDay.set(day, { label: formatDayMonth(order.createdAt), revenue: 0, orders: 0 });
+      const entry = byDay.get(day);
+      entry.revenue += Number(order.totalAmount) || 0;
       entry.orders += 1;
     });
-
-    return Array.from(dateMap.values()).map((entry) => ({
-      ...entry,
-      revenue: Number(entry.revenue.toFixed(2))
-    }));
+    return Array.from(byDay.values()).map((entry) => ({ ...entry, revenue: Math.round(entry.revenue * 100) / 100 }));
   }, [data]);
 
-  if (!chartData.length) {
-    return null;
-  }
+  if (!chartData.length) return null;
 
+  // Orders get their own right-hand axis so they are visible next to revenue.
   return (
-    <div className="chart-wrapper">
-      <div className="chart-header">
-        <span className="chart-title">Revenue Velocity & Order Trends</span>
-        <div className="chart-legend-custom">
-          <div className="legend-item">
-            <span className="legend-dot" style={{ backgroundColor: '#10b981' }} />
-            <span>Revenue ($)</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-dot" style={{ backgroundColor: '#06b6d4' }} />
-            <span>Orders</span>
-          </div>
-        </div>
-      </div>
-      <div style={{ width: '100%', height: '100%', minHeight: 240 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-            <defs>
-              <linearGradient id="salesRevenueGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.06)" vertical={false} />
-            <XAxis
-              dataKey="date"
-              stroke="#64748b"
-              fontSize={11}
-              tickLine={false}
-              axisLine={{ stroke: 'rgba(255, 255, 255, 0.1)' }}
-            />
-            <YAxis
-              stroke="#64748b"
-              fontSize={11}
-              tickLine={false}
-              axisLine={false}
-              tickFormatter={(val) => `$${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`}
-            />
-            <Tooltip content={<CustomTooltip />} />
-            <Area
-              type="monotone"
-              dataKey="revenue"
-              stroke="#10b981"
-              strokeWidth={2.5}
-              fillOpacity={1}
-              fill="url(#salesRevenueGrad)"
-              name="Revenue"
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+    <ChartFrame title="Revenue and orders by day" legend={[{ label: 'Revenue (left axis)', color: CHART.accent }, { label: 'Orders (right axis)', color: CHART.neutral }]}>
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={chartData} margin={{ top: 8, right: 0, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={CHART.grid} vertical={false} />
+          <XAxis dataKey="label" {...axisProps} minTickGap={16} />
+          <YAxis yAxisId="revenue" {...axisProps} axisLine={false} width={56} tickFormatter={formatCurrencyCompact} />
+          <YAxis yAxisId="orders" orientation="right" {...axisProps} axisLine={false} width={36} allowDecimals={false} />
+          <Tooltip cursor={tooltipCursor} content={<ChartTooltip rows={salesRows} />} />
+          <Bar yAxisId="orders" dataKey="orders" name="Orders" fill={CHART.neutral} fillOpacity={0.5} maxBarSize={18} isAnimationActive={false} />
+          <Area yAxisId="revenue" type="monotone" dataKey="revenue" name="Revenue" stroke={CHART.accent} strokeWidth={2} fill={CHART.accent} fillOpacity={0.12} isAnimationActive={false} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </ChartFrame>
   );
 }

@@ -1,48 +1,35 @@
 import React from 'react';
-import { AlertCircle, RefreshCw, Inbox } from 'lucide-react';
 
-export function WidgetSkeleton() {
+export function Spinner({ label }) {
+  return <span className="spinner" role={label ? 'status' : undefined} aria-label={label} aria-hidden={label ? undefined : 'true'} />;
+}
+
+export function WidgetSkeleton({ label = 'Loading' }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div className="kpi-row">
-        <div className="skeleton skeleton-card" />
-        <div className="skeleton skeleton-card" />
-        <div className="skeleton skeleton-card" />
-        <div className="skeleton skeleton-card" />
-      </div>
-      <div className="skeleton skeleton-chart" />
+    <div className="widget-state" role="status" aria-live="polite">
+      <Spinner /> <span>{label}…</span>
     </div>
   );
 }
 
-export function WidgetError({ error, onRetry, title = 'Widget Data Unavailable' }) {
+export function WidgetError({ error, onRetry, title = 'Data unavailable' }) {
   return (
-    <div className="widget-state-card widget-error-card">
-      <div className="widget-error-icon">
-        <AlertCircle size={24} />
+    <div className="widget-state widget-state-error" role="alert">
+      <div>
+        <p className="widget-state-title">{title}</p>
+        <p className="widget-state-message">{error?.message || 'The request failed. Other sections are unaffected.'}</p>
       </div>
-      <div className="widget-error-title">{title}</div>
-      <div className="widget-error-message">
-        {error?.message || 'An error occurred while fetching metrics for this domain. Other modules continue running normally.'}
-      </div>
-      {onRetry && (
-        <button className="btn-secondary" onClick={onRetry} style={{ marginTop: '6px' }}>
-          <RefreshCw size={14} /> Retry Query
-        </button>
-      )}
+      {onRetry && <button type="button" className="btn" onClick={() => onRetry()}>Retry</button>}
     </div>
   );
 }
 
-export function WidgetEmpty({ title = 'No Data Available', message = 'No metric entries found for the selected time range.' }) {
+export function WidgetEmpty({ title = 'No data', message = 'No records for the selected period.' }) {
   return (
-    <div className="widget-state-card">
-      <div className="widget-empty-icon">
-        <Inbox size={24} />
-      </div>
-      <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{title}</div>
-      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: 300 }}>
-        {message}
+    <div className="widget-state">
+      <div>
+        <p className="widget-state-title">{title}</p>
+        <p className="widget-state-message">{message}</p>
       </div>
     </div>
   );

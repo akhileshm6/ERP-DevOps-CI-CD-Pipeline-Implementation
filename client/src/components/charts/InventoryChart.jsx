@@ -1,110 +1,40 @@
 import React, { useMemo } from 'react';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Cell
-} from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { CHART, ChartFrame, ChartTooltip, axisProps, tooltipCursor } from './chartTheme';
+import { formatCurrencyPrecise, formatNumber } from '../../utils/format';
 
-function CustomInventoryTooltip({ active, payload }) {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    const isLow = data.quantity <= data.minStockLevel;
+const inventoryRows = (point) => [
+  ['Item', point.name],
+  ['SKU', point.sku],
+  ['On hand', formatNumber(point.quantity)],
+  ['Reorder level', formatNumber(point.minStockLevel)],
+  ['Unit price', formatCurrencyPrecise(point.unitPrice)],
+  ['Status', point.quantity <= point.minStockLevel ? 'Low' : 'OK']
+];
 
-    return (
-      <div className="custom-tooltip">
-        <div className="tooltip-title">{data.name}</div>
-        <div className="tooltip-row">
-          <span>SKU:</span>
-          <span className="tooltip-value">{data.sku}</span>
-        </div>
-        <div className="tooltip-row">
-          <span>In Stock:</span>
-          <span className="tooltip-value" style={{ color: isLow ? '#ef4444' : '#f59e0b' }}>
-            {data.quantity} units {isLow && '(Low Stock)'}
-          </span>
-        </div>
-        <div className="tooltip-row">
-          <span>Min Required:</span>
-          <span className="tooltip-value">{data.minStockLevel} units</span>
-        </div>
-        <div className="tooltip-row">
-          <span>Unit Price:</span>
-          <span className="tooltip-value">${Number(data.unitPrice).toFixed(2)}</span>
-        </div>
-      </div>
-    );
-  }
-  return null;
-}
-
+/** Expects items already sorted with low stock first; charts the first 10. */
 export function InventoryChart({ data = [] }) {
-  const chartData = useMemo(() => {
-    if (!data || data.length === 0) return [];
-    // Show top 8 items or unique SKUs for clear readability
-    return data.slice(0, 8).map((item) => ({
-      ...item,
-      displayName: item.name.length > 14 ? `${item.name.substring(0, 14)}...` : item.name,
-      isLow: item.quantity <= item.minStockLevel
-    }));
-  }, [data]);
+  const chartData = useMemo(() => data.slice(0, 10).map((item) => ({
+    ...item,
+    label: item.name,
+    // SKUs are unique and short; several items share a product name.
+    short: item.sku.replace(/^SKU-/, '')
+  })), [data]);
 
-  if (!chartData.length) {
-    return null;
-  }
+  if (!chartData.length) return null;
 
   return (
-    <div className="chart-wrapper">
-      <div className="chart-header">
-        <span className="chart-title">Stock Levels vs Reorder Thresholds</span>
-        <div className="chart-legend-custom">
-          <div className="legend-item">
-            <span className="legend-dot" style={{ backgroundColor: '#f59e0b' }} />
-            <span>Optimal Stock</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-dot" style={{ backgroundColor: '#ef4444' }} />
-            <span>Critical / Low</span>
-          </div>
-        </div>
-      </div>
-      <div style={{ width: '100%', height: '100%', minHeight: 240 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.06)" vertical={false} />
-            <XAxis
-              dataKey="displayName"
-              stroke="#64748b"
-              fontSize={10}
-              tickLine={false}
-              interval={0}
-              angle={-20}
-              textAnchor="end"
-            />
-            <YAxis
-              stroke="#64748b"
-              fontSize={11}
-              tickLine={false}
-              axisLine={false}
-              tickFormatter={(val) => `${val}`}
-            />
-            <Tooltip content={<CustomInventoryTooltip />} />
-            <Bar dataKey="quantity" radius={[4, 4, 0, 0]}>
-              {chartData.map((entry, index) => (
-                <Cell
-                  key={`cell-${index}`}
-                  fill={entry.isLow ? '#ef4444' : '#f59e0b'}
-                  fillOpacity={0.85}
-                />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+    <ChartFrame title="On hand vs reorder level, lowest cover first" legend={[{ label: 'On hand', color: CHART.accent }, { label: 'Reorder level', color: CHART.neutral }]}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} margin={{ top: 8, right: 0, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={CHART.grid} vertical={false} />
+          <XAxis dataKey="short" {...axisProps} interval={0} />
+          <YAxis {...axisProps} axisLine={false} width={44} allowDecimals={false} tickFormatter={formatNumber} />
+          <Tooltip cursor={tooltipCursor} content={<ChartTooltip rows={inventoryRows} />} />
+          <Bar dataKey="quantity" name="On hand" fill={CHART.accent} maxBarSize={24} isAnimationActive={false} />
+          <Bar dataKey="minStockLevel" name="Reorder level" fill={CHART.neutral} maxBarSize={24} isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartFrame>
   );
 }

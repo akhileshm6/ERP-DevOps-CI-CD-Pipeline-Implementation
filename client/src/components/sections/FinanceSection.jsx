@@ -1,20 +1,63 @@
-import React from 'react';
-import { BadgeDollarSign, ChartNoAxesCombined, ReceiptText, RefreshCw, TrendingUp } from 'lucide-react';
-import { FinanceChart } from '../charts/FinanceChart';
-import { KpiCard } from '../common/KpiCard';
+import React, { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { evaluateFlags } from '../../api/flagsApi';
+import { KpiStrip } from '../common/KpiStrip';
+import { DataTable } from '../common/DataTable';
+import { RangeSelector } from '../common/RangeSelector';
+import { SectionHeader } from '../common/SectionHeader';
+import { StatusBadge } from '../common/StatusBadge';
 import { WidgetEmpty, WidgetError, WidgetSkeleton } from '../common/WidgetStates';
+import { FinanceChart } from '../charts/FinanceChart';
+import { formatCurrency, formatCurrencyPrecise, formatDateTime, formatNumber, formatPercent, rangePeriod } from '../../utils/format';
 
-const ranges = ['today', '7d', '30d', 'quarter'];
-const money = (value) => `$${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+// The category chart is released behind the `new-finance-chart` feature flag,
+// resolved on the server for the caller's role. Off (or unknown) hides it.
+export const FINANCE_CHART_FLAG = 'new-finance-chart';
+
+const STATUS_TONES = { completed: 'success', cleared: 'success', paid: 'success', pending: 'warning', failed: 'danger' };
+
+const columns = [
+  { key: 'createdAt', header: 'Date', render: (row) => <span className="num">{formatDateTime(row.createdAt)}</span> },
+  { key: 'category', header: 'Category' },
+  { key: 'transactionType', header: 'Type' },
+  { key: 'amount', header: 'Amount', align: 'right', render: (row) => (row.transactionType === 'Expense' ? `−${formatCurrencyPrecise(row.amount)}` : formatCurrencyPrecise(row.amount)) },
+  { key: 'status', header: 'Status', render: (row) => <StatusBadge tone={STATUS_TONES[String(row.status || '').toLowerCase()] || 'neutral'}>{row.status || 'Unknown'}</StatusBadge> }
+];
 
 export function FinanceSection({ queryState, range, onRangeChange }) {
   const { data, isLoading, isError, error, refetch, isFetching } = queryState;
   const summary = data?.summary;
-  const items = data?.data || [];
-  const isProfitable = (summary?.netProfit || 0) >= 0;
+  const items = useMemo(() => data?.data || [], [data]);
+  const recent = useMemo(() => [...items].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)), [items]);
+  const period = rangePeriod(range);
+  const flagsQuery = useQuery({ queryKey: ['flags', 'evaluate'], queryFn: evaluateFlags });
+  const showChart = flagsQuery.data?.flags?.[FINANCE_CHART_FLAG] === true;
 
-  return <section className="domain-section finance">
-    <div className="section-header"><div className="section-title-wrap"><div className="domain-icon-badge finance"><BadgeDollarSign size={20} /></div><div><h2 className="section-title">Financial Performance</h2><p className="section-subtitle">Revenue, expenses, margin, and cash-flow distribution</p></div></div><div className="section-actions"><div className="range-tabs">{ranges.map((item) => <button key={item} className={`range-tab-btn ${range === item ? 'active' : ''}`} onClick={() => onRangeChange(item)}>{item === 'quarter' ? '90D' : item.toUpperCase()}</button>)}</div><button className="icon-btn" onClick={() => refetch()} disabled={isFetching} title="Refresh finance data"><RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} /></button></div></div>
-    {isLoading ? <WidgetSkeleton /> : isError ? <WidgetError error={error} onRetry={refetch} title="Finance Metrics Offline" /> : items.length === 0 ? <WidgetEmpty title="No Finance Records" message="No finance transactions were recorded in this time period." /> : <><div className="kpi-row"><KpiCard title="Revenue" value={money(summary?.totalRevenue)} icon={TrendingUp} /><KpiCard title="Expenses" value={money(summary?.totalExpenses)} icon={ReceiptText} /><KpiCard title="Net Profit" value={money(summary?.netProfit)} badgeText={isProfitable ? 'Profitable' : 'Loss'} badgeType={isProfitable ? 'positive' : 'alert'} icon={ChartNoAxesCombined} /><KpiCard title="Profit Margin" value={`${Number(summary?.profitMargin || 0).toFixed(1)}%`} subtitle={`${summary?.transactionCount || 0} transactions`} icon={BadgeDollarSign} /></div><FinanceChart data={items} /></>}
-  </section>;
+  return (
+    <section className="section" aria-labelledby="finance-title">
+      <SectionHeader id="finance-title" title="Finance" description="Revenue, expenses and net result for the selected period." onRefresh={refetch} isFetching={isFetching}>
+        <RangeSelector value={range} onChange={onRangeChange} label="Finance period" />
+      </SectionHeader>
+
+      {isLoading ? <WidgetSkeleton label="Loading finance" />
+        : isError ? <WidgetError error={error} onRetry={refetch} title="Finance data unavailable" />
+        : items.length === 0 ? <WidgetEmpty title="No transactions" message="No finance transactions were recorded in this period." />
+        : <>
+          <KpiStrip label="Finance figures" items={[
+            { label: 'Revenue', value: formatCurrency(summary?.totalRevenue), period },
+            { label: 'Expenses', value: formatCurrency(summary?.totalExpenses), period },
+            { label: (summary?.netProfit || 0) >= 0 ? 'Net profit' : 'Net loss', value: formatCurrency(summary?.netProfit), period, note: `${formatPercent(summary?.profitMargin)} margin` },
+            { label: 'Transactions', value: formatNumber(summary?.transactionCount), period, note: `${formatNumber(summary?.pendingCount)} pending` }
+          ]} />
+          {showChart ? <FinanceChart data={items} /> : !flagsQuery.isLoading && (
+            <p className="flag-note text-secondary">
+              {flagsQuery.isError
+                ? 'Category chart unavailable: feature flags could not be loaded.'
+                : <>Category chart is turned off for your role by the <code>{FINANCE_CHART_FLAG}</code> feature flag.</>}
+            </p>
+          )}
+          <DataTable caption="Recent transactions" columns={columns} rows={recent} />
+        </>}
+    </section>
+  );
 }

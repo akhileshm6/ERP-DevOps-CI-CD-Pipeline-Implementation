@@ -1,120 +1,45 @@
 import React, { useMemo } from 'react';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip
-} from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { CHART, ChartFrame, ChartTooltip, axisProps, tooltipCursor } from './chartTheme';
+import { formatCurrencyCompact, formatCurrencyPrecise } from '../../utils/format';
 
-function CustomFinanceTooltip({ active, payload, label }) {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    return (
-      <div className="custom-tooltip">
-        <div className="tooltip-title">{label}</div>
-        <div className="tooltip-row">
-          <span style={{ color: '#3b82f6' }}>Revenue:</span>
-          <span className="tooltip-value">${Number(data.revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-        </div>
-        <div className="tooltip-row">
-          <span style={{ color: '#f43f5e' }}>Expense:</span>
-          <span className="tooltip-value">${Number(data.expense || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-        </div>
-        <div className="tooltip-row">
-          <span style={{ color: '#10b981' }}>Net Balance:</span>
-          <span className="tooltip-value" style={{ color: data.net >= 0 ? '#10b981' : '#ef4444' }}>
-            ${Number(data.net || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </span>
-        </div>
-      </div>
-    );
-  }
-  return null;
-}
+const financeRows = (point) => [
+  ['Revenue', formatCurrencyPrecise(point.revenue)],
+  ['Expenses', formatCurrencyPrecise(point.expense)],
+  ['Net', formatCurrencyPrecise(point.revenue - point.expense)]
+];
 
 export function FinanceChart({ data = [] }) {
   const chartData = useMemo(() => {
-    if (!data || data.length === 0) return [];
-
-    const catMap = new Map();
-
+    const byCategory = new Map();
     data.forEach((tx) => {
-      const cat = tx.category || 'General';
-      if (!catMap.has(cat)) {
-        catMap.set(cat, {
-          category: cat,
-          revenue: 0,
-          expense: 0
-        });
-      }
-
-      const entry = catMap.get(cat);
-      if (tx.transactionType === 'Revenue') {
-        entry.revenue += tx.amount || 0;
-      } else {
-        entry.expense += tx.amount || 0;
-      }
+      const category = tx.category || 'General';
+      if (!byCategory.has(category)) byCategory.set(category, { label: category, revenue: 0, expense: 0 });
+      const entry = byCategory.get(category);
+      if (tx.transactionType === 'Revenue') entry.revenue += Number(tx.amount) || 0;
+      else entry.expense += Number(tx.amount) || 0;
     });
-
-    return Array.from(catMap.values())
-      .slice(0, 6)
-      .map((entry) => ({
-        ...entry,
-        displayName: entry.category.length > 14 ? `${entry.category.substring(0, 14)}...` : entry.category,
-        revenue: Number(entry.revenue.toFixed(2)),
-        expense: Number(entry.expense.toFixed(2)),
-        net: Number((entry.revenue - entry.expense).toFixed(2))
-      }));
+    return Array.from(byCategory.values())
+      .sort((a, b) => (b.revenue + b.expense) - (a.revenue + a.expense))
+      .slice(0, 8)
   }, [data]);
 
-  if (!chartData.length) {
-    return null;
-  }
+  if (!chartData.length) return null;
 
   return (
-    <div className="chart-wrapper">
-      <div className="chart-header">
-        <span className="chart-title">Revenue vs Expense by Flow Category</span>
-        <div className="chart-legend-custom">
-          <div className="legend-item">
-            <span className="legend-dot" style={{ backgroundColor: '#3b82f6' }} />
-            <span>Revenue</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-dot" style={{ backgroundColor: '#f43f5e' }} />
-            <span>Expense</span>
-          </div>
-        </div>
-      </div>
-      <div style={{ width: '100%', height: '100%', minHeight: 240 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.06)" vertical={false} />
-            <XAxis
-              dataKey="displayName"
-              stroke="#64748b"
-              fontSize={10}
-              tickLine={false}
-              interval={0}
-              angle={-20}
-              textAnchor="end"
-            />
-            <YAxis
-              stroke="#64748b"
-              fontSize={11}
-              tickLine={false}
-              axisLine={false}
-              tickFormatter={(val) => `$${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`}
-            />
-            <Tooltip content={<CustomFinanceTooltip />} />
-            <Bar dataKey="revenue" fill="#3b82f6" radius={[4, 4, 0, 0]} fillOpacity={0.85} name="Revenue" />
-            <Bar dataKey="expense" fill="#f43f5e" radius={[4, 4, 0, 0]} fillOpacity={0.85} name="Expense" />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+    <ChartFrame title="Revenue and expenses by category" legend={[{ label: 'Revenue', color: CHART.accent }, { label: 'Expenses', color: CHART.neutral }]}>
+      <ResponsiveContainer width="100%" height="100%">
+        {/* Horizontal bars so full category names stay readable. Each category is
+            either revenue or expense, so the two series stack into one bar. */}
+        <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={CHART.grid} horizontal={false} />
+          <XAxis type="number" {...axisProps} tickFormatter={formatCurrencyCompact} />
+          <YAxis type="category" dataKey="label" {...axisProps} axisLine={false} width={190} interval={0} />
+          <Tooltip cursor={tooltipCursor} content={<ChartTooltip rows={financeRows} />} />
+          <Bar dataKey="revenue" name="Revenue" stackId="amount" fill={CHART.accent} maxBarSize={18} isAnimationActive={false} />
+          <Bar dataKey="expense" name="Expenses" stackId="amount" fill={CHART.neutral} maxBarSize={18} isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartFrame>
   );
 }

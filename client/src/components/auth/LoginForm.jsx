@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { AlertCircle, LayoutDashboard, LoaderCircle, LogIn } from 'lucide-react';
 import { login } from '../../api/authApi';
+import { useStatus } from '../../hooks/useStatus';
+import { Spinner } from '../common/WidgetStates';
 
 const DEMO_ACCOUNTS = [
   { label: 'Admin', email: 'admin@erp.local', password: 'Admin123!' },
   { label: 'Manager', email: 'manager@erp.local', password: 'Manager123!' },
-  { label: 'User', email: 'user@erp.local', password: 'User123!' }
+  { label: 'Employee', email: 'user@erp.local', password: 'User123!' }
 ];
 
 export function LoginForm({ onLogin, notice }) {
@@ -13,6 +14,8 @@ export function LoginForm({ onLogin, notice }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const statusQuery = useStatus();
+  const isDemo = statusQuery.data?.dataSource === 'demo';
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -29,42 +32,39 @@ export function LoginForm({ onLogin, notice }) {
 
   return (
     <main className="login-screen">
-      <form className="login-card" onSubmit={handleSubmit} aria-labelledby="login-title">
-        <div className="brand-section">
-          <div className="brand-logo"><LayoutDashboard size={24} /></div>
-          <div className="brand-info">
-            <h1 id="login-title">ERP Metrics Dashboard</h1>
-            <p>Sign in to view your dashboard.</p>
-          </div>
-        </div>
+      <form className="login-form" onSubmit={handleSubmit} aria-labelledby="login-title" noValidate={false}>
+        <h1 id="login-title" className="login-title">SP301 ERP</h1>
+        <p className="text-secondary">Sign in with your work account.</p>
 
-        {notice && !error && <div className="login-notice" role="status">{notice}</div>}
-        {error && <div className="login-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</div>}
+        {notice && !error && <p className="message message-info" role="status">{notice}</p>}
+        {error && <p className="message message-error" role="alert">{error}</p>}
 
-        <label className="login-field">
-          <span>Email</span>
-          <input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} />
+        <label className="field">
+          <span className="field-label">Email</span>
+          <input className="input" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} />
         </label>
-        <label className="login-field">
-          <span>Password</span>
-          <input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
+        <label className="field">
+          <span className="field-label">Password</span>
+          <input className="input" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
         </label>
 
-        <button type="submit" className="btn-primary login-submit" disabled={isSubmitting}>
-          {isSubmitting ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <LogIn size={15} aria-hidden="true" />}
-          {isSubmitting ? 'Signing in...' : 'Sign in'}
+        <button type="submit" className="btn btn-primary btn-block" disabled={isSubmitting}>
+          {isSubmitting && <Spinner />}
+          {isSubmitting ? 'Signing in…' : 'Sign in'}
         </button>
 
-        <div className="login-demo">
-          <span>Demo accounts</span>
-          <div>
-            {DEMO_ACCOUNTS.map((account) => (
-              <button key={account.label} type="button" className="btn-secondary" onClick={() => { setEmail(account.email); setPassword(account.password); setError(''); }}>
-                {account.label}
-              </button>
-            ))}
+        {isDemo && (
+          <div className="login-demo" role="group" aria-labelledby="demo-accounts-label">
+            <span id="demo-accounts-label" className="field-label">Demo accounts</span>
+            <div className="login-demo-buttons">
+              {DEMO_ACCOUNTS.map((account) => (
+                <button key={account.label} type="button" className="btn btn-small" aria-label={`Fill ${account.label} demo account`} onClick={() => { setEmail(account.email); setPassword(account.password); setError(''); }}>
+                  {account.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </form>
     </main>
   );

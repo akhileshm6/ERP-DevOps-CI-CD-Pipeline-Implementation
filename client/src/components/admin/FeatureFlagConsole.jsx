@@ -1,15 +1,11 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Flag, SlidersHorizontal } from 'lucide-react';
 import { fetchFlags, updateFlag } from '../../api/flagsApi';
 import { WidgetEmpty, WidgetError, WidgetSkeleton } from '../common/WidgetStates';
+import { formatDateTime } from '../../utils/format';
 
 const ROLES = ['Admin', 'Manager', 'Employee'];
 const FLAGS_QUERY_KEY = ['flags'];
-
-function formatFlagName(key) {
-  return String(key || '').split(/[-_.]/).filter(Boolean).map((part, index) => (index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part)).join(' ');
-}
 
 function clampPercent(value) {
   const number = Number(value);
@@ -19,35 +15,47 @@ function clampPercent(value) {
 export function FeatureFlagConsole() {
   const queryClient = useQueryClient();
   const [rolloutDrafts, setRolloutDrafts] = useState({});
+  const [feedback, setFeedback] = useState({});
   const flagsQuery = useQuery({ queryKey: FLAGS_QUERY_KEY, queryFn: fetchFlags });
   const mutation = useMutation({
     mutationFn: ({ key, update }) => updateFlag(key, update),
-    onSuccess: (updatedFlag) => {
+    onSuccess: (updatedFlag, { key }) => {
       if (updatedFlag?.key) {
         queryClient.setQueryData(FLAGS_QUERY_KEY, (current) => (Array.isArray(current)
           ? current.map((flag) => (flag.key === updatedFlag.key ? updatedFlag : flag))
           : current));
       }
+      setFeedback((current) => ({ ...current, [key]: { type: 'success', message: 'Saved' } }));
+    },
+    onError: (error, { key }) => {
+      setFeedback((current) => ({ ...current, [key]: { type: 'error', message: error?.message || 'Update failed' } }));
     },
     onSettled: (data, error, { key }) => {
       setRolloutDrafts(({ [key]: _discarded, ...rest }) => rest);
       queryClient.invalidateQueries({ queryKey: FLAGS_QUERY_KEY });
-      queryClient.invalidateQueries({ queryKey: ['flags-evaluate'] });
+      queryClient.invalidateQueries({ queryKey: ['flags', 'evaluate'] });
     }
   });
 
-  if (flagsQuery.isLoading) {
-    return <section className="feature-flag-console" aria-busy="true"><div style={{ padding: 24 }}><WidgetSkeleton /></div></section>;
-  }
-  if (flagsQuery.isError) {
-    return <section className="feature-flag-console"><WidgetError title="Feature flags unavailable" error={flagsQuery.error} onRetry={() => flagsQuery.refetch()} /></section>;
-  }
+  const header = (
+    <div className="section-header">
+      <div>
+        <h2 id="feature-flag-title" className="section-title">Feature flags</h2>
+        <p className="section-description">Turn features on or off and set rollout by role. Changes apply to this environment.</p>
+      </div>
+    </div>
+  );
+
+  if (flagsQuery.isLoading) return <section className="section" aria-labelledby="feature-flag-title">{header}<WidgetSkeleton label="Loading feature flags" /></section>;
+  if (flagsQuery.isError) return <section className="section" aria-labelledby="feature-flag-title">{header}<WidgetError title="Feature flags unavailable" error={flagsQuery.error} onRetry={flagsQuery.refetch} /></section>;
 
   const flags = Array.isArray(flagsQuery.data) ? flagsQuery.data : [];
-  const enabledCount = flags.filter((flag) => flag.enabled).length;
   const savingKey = mutation.isPending ? mutation.variables?.key : null;
 
-  const save = (key, update) => mutation.mutate({ key, update });
+  const save = (key, update) => {
+    setFeedback(({ [key]: _discarded, ...rest }) => rest);
+    mutation.mutate({ key, update });
+  };
 
   const commitRollout = (flag) => {
     const draft = rolloutDrafts[flag.key];
@@ -62,89 +70,77 @@ export function FeatureFlagConsole() {
   };
 
   return (
-    <section className="feature-flag-console" aria-labelledby="feature-flag-title">
-      <header className="feature-flag-header">
-        <div className="feature-flag-heading">
-          <div className="feature-flag-icon"><Flag size={18} aria-hidden="true" /></div>
-          <div>
-            <h2 id="feature-flag-title">Feature flags</h2>
-            <p>Control feature availability and staged rollouts by role.</p>
-          </div>
+    <section className="section" aria-labelledby="feature-flag-title">
+      {header}
+      <p className="text-secondary num" aria-live="polite">{flags.filter((flag) => flag.enabled).length} of {flags.length} enabled</p>
+      {flags.length === 0 ? <WidgetEmpty title="No feature flags" message="No feature flags are configured for this environment." /> : (
+        <div className="table-scroll">
+          <table className="table table-flags">
+            <caption className="visually-hidden">Feature flags</caption>
+            <thead><tr><th scope="col">Flag</th><th scope="col">Enabled</th><th scope="col">Rollout</th><th scope="col">Target roles</th><th scope="col">Last updated</th></tr></thead>
+            <tbody>
+              {flags.map((flag) => {
+                const rollout = rolloutDrafts[flag.key] ?? clampPercent(flag.rollout_percent);
+                const targetRoles = Array.isArray(flag.target_roles) ? flag.target_roles : [];
+                const isSaving = savingKey === flag.key;
+                const rowFeedback = feedback[flag.key];
+                return (
+                  <tr key={flag.key} aria-busy={isSaving}>
+                    <td>
+                      <div className="mono cell-strong">{flag.key}</div>
+                      {flag.description && <div className="cell-sub">{flag.description}</div>}
+                      <div className="row-feedback" role={rowFeedback?.type === 'error' ? 'alert' : 'status'}>
+                        {isSaving ? 'Saving…' : rowFeedback ? <span className={rowFeedback.type === 'error' ? 'text-danger' : 'text-success'}>{rowFeedback.type === 'error' ? `Not saved: ${rowFeedback.message}` : rowFeedback.message}</span> : null}
+                      </div>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={Boolean(flag.enabled)}
+                        aria-label={`Enabled: ${flag.key}`}
+                        className="switch"
+                        disabled={isSaving}
+                        onClick={() => save(flag.key, { enabled: !flag.enabled })}
+                      ><span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span><span className="switch-text">{flag.enabled ? 'On' : 'Off'}</span></button>
+                    </td>
+                    <td>
+                      <div className="rollout">
+                        <input
+                          type="range" min="0" max="100" step="5"
+                          value={rollout}
+                          disabled={isSaving}
+                          aria-label={`Rollout percentage: ${flag.key}`}
+                          onChange={(event) => setRolloutDrafts((current) => ({ ...current, [flag.key]: Number(event.target.value) }))}
+                          onPointerUp={() => commitRollout(flag)}
+                          onKeyUp={() => commitRollout(flag)}
+                          onBlur={() => commitRollout(flag)}
+                        />
+                        <output className="num">{rollout}%</output>
+                      </div>
+                    </td>
+                    <td>
+                      <fieldset className="role-checks" disabled={isSaving}>
+                        <legend className="visually-hidden">Target roles for {flag.key}</legend>
+                        {ROLES.map((role) => (
+                          <label key={role}>
+                            <input type="checkbox" checked={targetRoles.includes(role)} onChange={() => toggleRole(flag, role)} />
+                            {role}
+                          </label>
+                        ))}
+                      </fieldset>
+                    </td>
+                    <td>
+                      <div>{flag.updated_by || '—'}</div>
+                      <div className="cell-sub num">{formatDateTime(flag.updated_at)}</div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-        <div className="feature-flag-summary" aria-live="polite">
-          <SlidersHorizontal size={15} aria-hidden="true" />
-          <span>{enabledCount} of {flags.length} enabled</span>
-          <span className="feature-flag-storage">{savingKey ? 'Saving...' : 'Synced with server'}</span>
-        </div>
-      </header>
-
-      {mutation.isError && <div className="feature-flag-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {mutation.error?.message || 'Failed to update feature flag.'}</div>}
-
-      {flags.length === 0 ? <WidgetEmpty title="No feature flags" message="No feature flags are configured for this environment." /> : <>
-        <div className="feature-flag-columns" aria-hidden="true">
-          <span>Feature</span><span>Rollout</span><span>Target roles</span><span>Enabled</span>
-        </div>
-        <div className="feature-flag-list" role="list">
-          {flags.map((flag) => {
-            const name = formatFlagName(flag.key);
-            const rollout = rolloutDrafts[flag.key] ?? clampPercent(flag.rollout_percent);
-            const targetRoles = Array.isArray(flag.target_roles) ? flag.target_roles : [];
-            const isSaving = savingKey === flag.key;
-            return (
-              <article className={`feature-flag-row ${isSaving ? 'is-saving' : ''}`} key={flag.key} role="listitem" aria-busy={isSaving}>
-                <div className="feature-flag-identity">
-                  <h3>{name}</h3>
-                  <p>{flag.description}</p>
-                  <code>{flag.key}</code>
-                </div>
-
-                <label className="feature-flag-rollout">
-                  <span>Rollout</span>
-                  <div className="feature-flag-slider-row">
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="5"
-                      value={rollout}
-                      disabled={isSaving}
-                      aria-label={`Rollout percentage for ${name}`}
-                      onChange={(event) => setRolloutDrafts((current) => ({ ...current, [flag.key]: Number(event.target.value) }))}
-                      onPointerUp={() => commitRollout(flag)}
-                      onKeyUp={() => commitRollout(flag)}
-                      onBlur={() => commitRollout(flag)}
-                    />
-                    <output>{rollout}%</output>
-                  </div>
-                </label>
-
-                <fieldset className="feature-flag-targets" disabled={isSaving}>
-                  <legend>Target roles</legend>
-                  {ROLES.map((role) => (
-                    <label key={role}>
-                      <input type="checkbox" checked={targetRoles.includes(role)} onChange={() => toggleRole(flag, role)} />
-                      <span>{role === 'Employee' ? 'User' : role}</span>
-                    </label>
-                  ))}
-                </fieldset>
-
-                <div className="feature-flag-enabled">
-                  <span>{flag.enabled ? 'On' : 'Off'}</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={Boolean(flag.enabled)}
-                    aria-label={`${flag.enabled ? 'Disable' : 'Enable'} ${name}`}
-                    className={`feature-flag-switch ${flag.enabled ? 'is-enabled' : ''}`}
-                    disabled={isSaving}
-                    onClick={() => save(flag.key, { enabled: !flag.enabled })}
-                  ><span /></button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </>}
+      )}
     </section>
   );
 }
