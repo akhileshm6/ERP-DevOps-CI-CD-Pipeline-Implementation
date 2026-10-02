@@ -11,7 +11,7 @@ router.get('/current', async (req, res) => {
       commitSha: process.env.COMMIT_SHA || 'local-sha',
       branch: process.env.GIT_BRANCH || 'main',
       environment: process.env.NODE_ENV || 'development',
-      deployedAt: process.env.BUILD_TIMESTAMP || new Date().toISOString(),
+      deployedAt: process.env.BUILD_TIMESTAMP || null, // unknown unless CI stamps it
       pipelineStatus: 'success'
     });
   } catch (error) {

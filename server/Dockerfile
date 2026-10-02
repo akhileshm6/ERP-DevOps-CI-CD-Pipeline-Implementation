@@ -24,7 +24,8 @@ COPY . .
 ARG APP_VERSION=dev
 ARG COMMIT_SHA=local
 ARG GIT_BRANCH=local
-ENV APP_VERSION=$APP_VERSION COMMIT_SHA=$COMMIT_SHA GIT_BRANCH=$GIT_BRANCH
+ARG BUILD_TIMESTAMP=
+ENV APP_VERSION=$APP_VERSION COMMIT_SHA=$COMMIT_SHA GIT_BRANCH=$GIT_BRANCH BUILD_TIMESTAMP=$BUILD_TIMESTAMP
 
 # node:18-alpine ships an unprivileged `node` user (uid 1000). Run as it, and
 # own the app directory so nothing needs to write as root at runtime.
