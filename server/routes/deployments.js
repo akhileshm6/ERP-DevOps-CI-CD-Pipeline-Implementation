@@ -42,8 +42,24 @@ router.get('/', async (req, res) => {
   }
 });
 
+// CI authenticates with a shared token (header `X-Deploy-Token`) so nobody
+// else can forge deployment history. Hosted environments must configure it.
+const requireDeployToken = (req, res, next) => {
+  const expected = process.env.DEPLOY_API_TOKEN;
+  if (!expected) {
+    if (/^(staging|production)$/.test(process.env.NODE_ENV || '')) {
+      return res.status(503).json({ error: 'DEPLOY_API_TOKEN not configured' });
+    }
+    return next(); // local development
+  }
+  if (req.get('X-Deploy-Token') !== expected) {
+    return res.status(401).json({ error: 'Invalid deploy token' });
+  }
+  next();
+};
+
 // POST /api/deployments (Record deployment outcome from CI)
-router.post('/', async (req, res) => {
+router.post('/', requireDeployToken, async (req, res) => {
   const { version, imageTag, commitSha, environment, status, triggeredBy, triggerType, durationSeconds, testSummary } = req.body;
   try {
     const result = await db.query(

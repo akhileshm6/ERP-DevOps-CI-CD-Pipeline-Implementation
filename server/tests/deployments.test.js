@@ -14,3 +14,13 @@ describe('GET /api/deployments/current', () => {
     expect(response.body.pipelineStatus).toBe('success');
   });
 });
+
+describe('POST /api/deployments', () => {
+  afterEach(() => { delete process.env.DEPLOY_API_TOKEN; });
+
+  test('rejects a missing or wrong deploy token', async () => {
+    process.env.DEPLOY_API_TOKEN = 'ci-token';
+    await request(app).post('/api/deployments').send({}).expect(401);
+    await request(app).post('/api/deployments').set('X-Deploy-Token', 'nope').send({}).expect(401);
+  });
+});
