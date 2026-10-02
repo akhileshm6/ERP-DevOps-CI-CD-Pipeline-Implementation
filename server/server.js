@@ -18,6 +18,7 @@ const statusRoutes = require('./routes/status');
 const { usersRepository, store } = require('./db/repositories');
 const { bootstrap } = require('./db/bootstrap');
 const { migrate } = require('./db/migrate');
+const { loginThrottle, recordFailure, recordSuccess } = require('./middleware/loginThrottle');
 const promClient = require('prom-client');
 
 const normalizeRole = (role) => {
@@ -155,7 +156,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginThrottle, async (req, res) => {
     try {
         const { email, password } = req.body || {};
         if (typeof email !== 'string' || typeof password !== 'string') {
@@ -164,8 +165,10 @@ app.post('/api/auth/login', async (req, res) => {
 
         const user = await usersRepository.findByEmail(email.trim().toLowerCase());
         if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+            recordFailure(req);
             return res.status(401).json({ error: 'Invalid email or password' });
         }
+        recordSuccess(req);
 
         const token = jwt.sign(
             { id: user.id, role: user.role, name: user.name },

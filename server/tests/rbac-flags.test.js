@@ -83,6 +83,8 @@ const MATRIX = [
     ['/api/invoices', 'get', 200, 200, 200],
     ['/api/reports/summary', 'get', 200, 200, 403],
     ['/api/metrics', 'get', 200, 403, 403],
+    ['/api/flags', 'get', 200, 403, 403],
+    ['/api/deployments', 'get', 200, 200, 403],
     ['/api/flags/evaluate', 'get', 200, 200, 200],
 ];
 

@@ -43,3 +43,18 @@ describe('POST /api/auth/register', () => {
     await request(app).post('/api/auth/register').send({ email: 'x' }).expect(400);
   });
 });
+
+describe('failed-login throttle', () => {
+  const { MAX_FAILURES } = require('../middleware/loginThrottle');
+
+  test('locks an email after repeated wrong passwords, even for the right one', async () => {
+    const attempt = (password) => request(app).post('/api/auth/login').send({ email: 'user@erp.local', password });
+    for (let i = 0; i < MAX_FAILURES; i += 1) await attempt('wrong-password').expect(401);
+    const blocked = await attempt('User123!').expect(429);
+    expect(blocked.headers['retry-after']).toBeDefined();
+  });
+
+  test('does not affect other accounts', async () => {
+    await request(app).post('/api/auth/login').send({ email: 'admin@erp.local', password: 'Admin123!' }).expect(200);
+  });
+});

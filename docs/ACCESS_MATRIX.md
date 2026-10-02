@@ -25,6 +25,21 @@ not access control — every row here is asserted by the test suite.
 | `GET /api/reports/summary` | 200 | 200 | 403 |
 | `GET /api/metrics` | 200 | 403 | 403 |
 | `GET /api/flags/evaluate` | 200 | 200 | 200 |
+| `GET /api/metrics/sales`, `/inventory` | 200 | 200 | 200 |
+| `GET /api/metrics/hr`, `/finance` | 200 | 200 | 403 |
+| `POST /api/employees` | 201 | 403 | 403 |
+| `GET /api/flags` | 200 | 403 | 403 |
+| `PATCH /api/flags/:key` | 200 | 403 | 403 |
+| `GET /api/deployments` | 200 | 200 | 403 |
+| `POST /api/auth/register` with `role: Admin`/`Manager` | 201 | 403 | 403 |
+
+Public (no token): `POST /api/auth/login`, `POST /api/auth/register` (always
+creates an Employee), `GET /health`, `GET /ready`, `GET /api/status`,
+`GET /api/deployments/current`. `POST /api/deployments` is for CI only and
+authenticates with `X-Deploy-Token`, not a user JWT.
+
+*Rows added 3 Oct 2026; covered by `tests/metrics.routes.test.js`,
+`tests/erp-data.test.js`, `tests/auth.test.js` and the CI readiness gate.*
 
 Token handling: **401** when no token is supplied, **403** when a token is
 supplied but is malformed, expired, or signed with the wrong secret.
