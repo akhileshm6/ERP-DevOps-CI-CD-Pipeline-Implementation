@@ -7,6 +7,22 @@
 
 process.env.JWT_SECRET = 'test_secret_for_rbac_suite';
 
+// CI has no Postgres, so the pool is stubbed with the rows that
+// 06_contract_tables.sql seeds. Set TEST_LIVE_DB=1 to run against the real
+// database instead (e.g. with the Compose stack up).
+if (!process.env.TEST_LIVE_DB) {
+    const SEEDED_FLAGS = [
+        { key: 'beta-dashboard', description: '', enabled: true, rollout_percent: 100, target_roles: ['Admin'], environment: 'all' },
+        { key: 'legacy-export', description: '', enabled: false, rollout_percent: 0, target_roles: ['Admin'], environment: 'all' },
+        { key: 'new-finance-chart', description: '', enabled: true, rollout_percent: 100, target_roles: ['Admin', 'Manager'], environment: 'all' },
+    ];
+    jest.mock('../db/pool', () => ({
+        query: jest.fn(async () => ({ rows: SEEDED_FLAGS })),
+        isHealthy: jest.fn(async () => true),
+        pool: { end: jest.fn(async () => {}) },
+    }));
+}
+
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 

@@ -68,4 +68,7 @@ const authorizeRoles = (...allowedRoles) => {
     };
 };
 
-module.exports = { authenticateToken, authorizeRoles, normaliseRole, SECRET };
+// `requireRole([...])` is the array-style spelling used in Akhilesh's routes.
+const requireRole = (roles) => authorizeRoles(...roles);
+
+module.exports = { authenticateToken, authorizeRoles, requireRole, normaliseRole, SECRET };

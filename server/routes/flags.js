@@ -1,14 +1,14 @@
 const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
-const { authenticateToken, normaliseRole } = require('../middleware/auth');
+const { authenticateToken, authorizeRoles, normaliseRole } = require('../middleware/auth');
 const db = require('../db/pool');
 
 // Feature flag evaluation.
 // Owner: Vivek Anand (Phase 6 lead).
 //
-// Scope note: PATCH /api/flags/:key (Admin-only flag mutation) is Ayush's
-// Week 9 task and is deliberately NOT implemented here.
+// PATCH /api/flags/:key (Admin toggle) ported from Akhilesh's commit 5c6f3058
+// onto the shared pool, with the change recorded in flag_events and audit_log.
 
 /**
  * Deterministic 0-99 bucket for a (flag, subject) pair.
@@ -87,6 +87,48 @@ router.get('/evaluate', authenticateToken, async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ error: 'Flag evaluation failed', detail: err.message });
+    }
+});
+
+/**
+ * PATCH /api/flags/:key — Admin-only flag mutation.
+ * Body: { enabled?, rolloutPercent?, targetRoles? }. Omitted fields keep their value.
+ */
+router.patch('/:key', authenticateToken, authorizeRoles('Admin'), async (req, res) => {
+    const { key } = req.params;
+    const { enabled, rolloutPercent, targetRoles } = req.body || {};
+    const actor = req.user.name || req.user.email || String(req.user.id || 'Admin');
+
+    if (rolloutPercent !== undefined && !(Number.isInteger(rolloutPercent) && rolloutPercent >= 0 && rolloutPercent <= 100)) {
+        return res.status(400).json({ error: 'rolloutPercent must be an integer 0-100' });
+    }
+
+    try {
+        const current = await db.query('SELECT * FROM feature_flags WHERE key = $1', [key]);
+        if (current.rows.length === 0) return res.status(404).json({ error: 'Flag not found' });
+
+        const updated = await db.query(
+            `UPDATE feature_flags
+                SET enabled = COALESCE($1, enabled),
+                    rollout_percent = COALESCE($2, rollout_percent),
+                    target_roles = COALESCE($3, target_roles),
+                    updated_by = $4,
+                    updated_at = NOW()
+              WHERE key = $5 RETURNING *`,
+            [enabled ?? null, rolloutPercent ?? null, targetRoles ?? null, actor, key]
+        );
+
+        const from = JSON.stringify(current.rows[0]);
+        const to = JSON.stringify(updated.rows[0]);
+        await db.query('INSERT INTO flag_events (flag_key, actor, from_state, to_state) VALUES ($1, $2, $3, $4)', [key, actor, from, to]);
+        await db.query(
+            "INSERT INTO audit_log (actor, action, module, details) VALUES ($1, 'TOGGLE_FEATURE_FLAG', 'flags', $2)",
+            [actor, JSON.stringify({ key, from: current.rows[0], to: updated.rows[0] })]
+        );
+
+        res.json(updated.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Flag update failed', detail: err.message });
     }
 });
 

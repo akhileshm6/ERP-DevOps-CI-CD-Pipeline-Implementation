@@ -3,7 +3,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { authenticateToken, authorizeRoles } = require('./middleware/auth');
+const { authenticateToken, authorizeRoles, SECRET } = require('./middleware/auth');
 const db = require('./db/pool');
 
 // Route Modules
@@ -13,6 +13,8 @@ const invoiceRoutes = require('./routes/invoices');
 const reportRoutes = require('./routes/reports');
 const metricsRoutes = require('./routes/metrics');
 const flagRoutes = require('./routes/flags');   // Vivek — Phase 6
+const deploymentsRoutes = require('./routes/deployments');   // Akhilesh — deployment history
+const promClient = require('prom-client');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -122,7 +124,7 @@ app.post('/api/auth/login', async (req, res) => {
 
         const token = jwt.sign(
             { id: user.id, role: user.role },
-            process.env.JWT_SECRET || 'dev_secret_key',
+            SECRET,
             { expiresIn: '8h' }
         );
 
@@ -143,6 +145,21 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/flags', flagRoutes);   // Vivek — Phase 6 (GET /api/flags/evaluate)
+app.use('/api/deployments', deploymentsRoutes);   // Akhilesh — deployment history
+
+// Prometheus scrape endpoint (Akhilesh). Default metrics are registered once
+// per process; Jest re-requires this module, so guard against double registration.
+if (!promClient.register.getSingleMetric('process_cpu_seconds_total')) {
+    promClient.collectDefaultMetrics();
+}
+app.get('/metrics', async (req, res) => {
+    try {
+        res.set('Content-Type', promClient.register.contentType);
+        res.end(await promClient.register.metrics());
+    } catch (ex) {
+        res.status(500).end(String(ex));
+    }
+});
 
 // ---- Error handling (Vivek, Week 11) -----------------------------------
 // A CORS rejection is a client error, not a server fault. Without this the
