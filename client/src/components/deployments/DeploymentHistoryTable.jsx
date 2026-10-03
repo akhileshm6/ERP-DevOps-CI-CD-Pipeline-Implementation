@@ -41,8 +41,8 @@ function RollbackPanel({ deployment, id, onClose }) {
   return (
     <div className="rollback-panel" id={id} role="region" aria-label={`Roll back ${deployment.version || 'deployment'}`}>
       <p>
-        Rollback is not automatic. It is done by running the <strong>Rollback</strong> GitHub Actions workflow by hand
-        with this deployment's commit SHA{deployment.environment ? <> and the <strong>{deployment.environment}</strong> environment</> : null}.
+        Rollback is not automatic. Run the <strong>Rollback</strong> GitHub Actions workflow by hand with this
+        commit SHA: it redeploys <strong>production</strong> from that commit's image. The database is not rolled back.
       </p>
       {sha ? (
         <div className="rollback-sha">
