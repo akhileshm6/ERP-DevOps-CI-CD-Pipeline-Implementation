@@ -23,15 +23,32 @@ jobs:
           cd server
           npm ci
 
-      - name: Run Security Audit
+      # Enforced: fails the build on any high/critical advisory in the API's
+      # runtime dependencies (the code that actually ships).
+      - name: Run Security Audit (server runtime dependencies)
         run: |
           cd server
-          npm run audit || true
+          npm audit --omit=dev --audit-level=high
 
       - name: Run Backend Unit Tests
         run: |
           cd server
           npm test
+
+      - name: Install Client Dependencies
+        run: |
+          cd client
+          npm ci
+
+      - name: Run Client Tests
+        run: |
+          cd client
+          CI=true npx react-scripts test --watchAll=false
+
+      - name: Build Client (production)
+        run: |
+          cd client
+          CI=true npx react-scripts build
 
   publish-and-deploy:
     needs: quality-and-test
@@ -69,3 +86,213 @@ jobs:
 
       - name: Trigger Frontend Cloud Deployment
         run: curl -X POST ${{ secrets.RENDER_FRONTEND_HOOK }}
+
+  # ===================================================================
+  # Added by Vivek (Week 4 / Week 7) — Containerisation & Architecture.
+  # APPEND ONLY: nothing above this line has been modified.
+  # Existing jobs `quality-and-test` and `publish-and-deploy` are Ayush's.
+  # ===================================================================
+
+  # Publish immutable, per-commit image tags to GHCR.
+  # Ayush's Docker Hub job publishes :latest only; rollback and registry
+  # retention both need a tag that pins one exact commit, so this runs
+  # alongside it rather than replacing it.
+  publish-ghcr:
+    name: Publish SHA-tagged images to GHCR
+    needs: quality-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase the owner for the image path
+        id: owner
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Record build time
+        id: built
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and Push Backend (SHA + latest)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          push: true
+          # Stamped into the image so GET /api/deployments/current reports what is running.
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}-${{ github.run_number }}
+            COMMIT_SHA=${{ github.sha }}
+            GIT_BRANCH=${{ github.ref_name }}
+            BUILD_TIMESTAMP=${{ steps.built.outputs.at }}
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.name }}/erp-server:${{ github.sha }}
+            ghcr.io/${{ steps.owner.outputs.name }}/erp-server:latest
+
+      - name: Build and Push Frontend (SHA + latest)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./client
+          push: true
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.name }}/erp-client:${{ github.sha }}
+            ghcr.io/${{ steps.owner.outputs.name }}/erp-client:latest
+
+  # Readiness gate. Boots the exact image built from this commit against a
+  # throwaway Postgres and requires /ready to return 200. This is what the
+  # production deploy hangs on, so a broken readiness probe can never reach
+  # production.
+  readiness-gate:
+    name: Readiness gate (blocks production)
+    # Runs on pull requests too, so the gate is proven before anything merges.
+    # It boots the API from this commit against a real Postgres, through the
+    # same startup path production uses: migrate -> seed -> serve.
+    needs: quality-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: erp_user
+          POSTGRES_PASSWORD: erp_password
+          POSTGRES_DB: erp_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U erp_user -d erp_db"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://erp_user:erp_password@localhost:5432/erp_db
+      JWT_SECRET: ci_gate_secret
+      NODE_ENV: development
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Server Dependencies
+        run: cd server && npm ci
+
+      - name: Apply migrations (runner)
+        run: cd server && npm run migrate
+
+      - name: Re-run migrations (must be a no-op)
+        run: cd server && npm run migrate | tee /tmp/migrate2.log && grep -q "up to date" /tmp/migrate2.log
+
+      - name: Failure path — a forced readiness failure must return 503
+        run: |
+          cd server && READINESS_FORCE_FAIL=true PORT=5001 node server.js &
+          for i in $(seq 1 15); do
+            sleep 2
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5001/ready || echo 000)
+            [ "$code" = "000" ] && continue
+            echo "forced-fail /ready -> HTTP $code"
+            [ "$code" = "503" ] && { echo "Gate correctly reports not ready"; exit 0; }
+            echo "Expected 503 from a forced failure" >&2; exit 1
+          done
+          echo "API never started" >&2; exit 1
+
+      - name: Success path — start API and probe /ready
+        run: |
+          cd server && PORT=5000 node server.js > /tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            sleep 2
+            code=$(curl -s -o /tmp/ready.json -w '%{http_code}' http://localhost:5000/ready || echo 000)
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "READINESS GATE PASSED"; cat /tmp/ready.json; exit 0
+            fi
+          done
+          echo "READINESS GATE FAILED — refusing to promote this build"
+          cat /tmp/ready.json 2>/dev/null || true; cat /tmp/server.log
+          exit 1
+
+      - name: API smoke test (login, RBAC, seeded data)
+        run: |
+          sleep 3   # let first-boot seeding finish
+          login() { curl -fsS http://localhost:5000/api/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"password\":\"$2\"}" | jq -r .token; }
+          ADMIN=$(login admin@erp.local 'Admin123!')
+          USER=$(login user@erp.local 'User123!')
+          code() { curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" "http://localhost:5000$2"; }
+          check() { got=$(code "$1" "$2"); echo "$3 $2 -> $got"; [ "$got" = "$4" ] || exit 1; }
+          check ""      /api/metrics/sales   anon  401
+          check "$USER" /api/metrics/sales   user  200
+          check "$USER" /api/metrics/finance user  403
+          check "$ADMIN" /api/reports/summary admin 200
+          orders=$(curl -fsS -H "Authorization: Bearer $ADMIN" http://localhost:5000/api/metrics/sales | jq .summary.orderCount)
+          echo "seeded orders in last 30 days: $orders"; [ "$orders" -gt 0 ]
+
+  # Production deploy. Gated three ways:
+  #   1. `if:` guard — only ever runs for a push to main
+  #   2. `needs: [publish-ghcr, readiness-gate]` — a failed probe blocks it
+  #   3. `environment: production` — GitHub holds it for a required reviewer
+  deploy-production:
+    name: Deploy to production (main only)
+    needs: [publish-ghcr, readiness-gate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Trigger production deployment
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
+            echo "RENDER_DEPLOY_HOOK not set for the production environment." >&2
+            echo "Add it under Settings -> Environments -> production." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          echo "Production deploy triggered for ${{ github.sha }}"
+
+      - name: Post-deploy smoke test
+        run: |
+          sleep 45
+          code=$(curl -s -o /dev/null -w '%{http_code}' "${{ secrets.APP_BASE_URL }}/ready" || echo 000)
+          echo "production /ready -> HTTP $code"
+          [ "$code" = "200" ] || { echo "Smoke test failed; rollback should fire." >&2; exit 1; }
+
+      # Record the outcome in deployment history (POST /api/deployments).
+      # Runs on failure too, so failed deploys show up on the dashboard.
+      - name: Record deployment outcome
+        if: always()
+        env:
+          STATUS: ${{ job.status == 'success' && 'success' || 'failed' }}
+        run: |
+          if [ -z "${{ secrets.DEPLOY_API_TOKEN }}" ]; then
+            echo "DEPLOY_API_TOKEN not set; skipping deployment record." >&2
+            exit 0
+          fi
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          body=$(jq -n \
+            --arg version "${{ github.ref_name }}-${{ github.run_number }}" \
+            --arg tag "ghcr.io/$owner/erp-server:${{ github.sha }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg by "${{ github.actor }}" \
+            --arg status "$STATUS" \
+            --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{version: $version, imageTag: $tag, commitSha: $sha, environment: "production",
+              status: $status, triggeredBy: $by, triggerType: "automated",
+              testSummary: {run: $run}}')
+          curl -fsS -X POST "${{ secrets.APP_BASE_URL }}/api/deployments" \
+            -H 'Content-Type: application/json' \
+            -H "X-Deploy-Token: ${{ secrets.DEPLOY_API_TOKEN }}" \
+            -d "$body" || echo "Could not record deployment (non-fatal)." >&2

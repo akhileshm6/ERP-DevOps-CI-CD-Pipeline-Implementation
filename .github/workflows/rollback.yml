@@ -1,0 +1,116 @@
+name: Rollback
+
+# Manual rollback to a previously published, SHA-tagged image.
+# Lane: Ayush (core CI/CD). Drafted during integration so the pipeline has a
+# working rollback path — review and take ownership.
+#
+# How it works: publish-ghcr in ci.yml pushes erp-server:<sha> and
+# erp-client:<sha> for every commit on main, and registry-retention.yml keeps
+# the last 20. Rolling back re-points :latest at the chosen SHA (no rebuild),
+# triggers the production deploy hook, smoke-tests /ready, and records the
+# outcome through POST /api/deployments.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Full commit SHA of the image to roll back to (must exist in GHCR)'
+        required: true
+      reason:
+        description: 'Why are we rolling back?'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Roll production back to ${{ inputs.sha }}
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Validate input
+        run: |
+          echo "${{ inputs.sha }}" | grep -Eq '^[0-9a-f]{40}$' || {
+            echo "sha must be a full 40-character commit SHA." >&2; exit 1; }
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase the owner for the image path
+        id: owner
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm the target images exist
+        run: |
+          for img in erp-server erp-client; do
+            ref="ghcr.io/${{ steps.owner.outputs.name }}/$img:${{ inputs.sha }}"
+            docker buildx imagetools inspect "$ref" > /dev/null || {
+              echo "$ref not found — it may have aged out of the retention window." >&2; exit 1; }
+          done
+
+      - name: Re-point :latest at the target SHA
+        run: |
+          for img in erp-server erp-client; do
+            base="ghcr.io/${{ steps.owner.outputs.name }}/$img"
+            docker buildx imagetools create -t "$base:latest" "$base:${{ inputs.sha }}"
+          done
+
+      - name: Trigger production deployment
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
+            echo "RENDER_DEPLOY_HOOK not set for the production environment." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Smoke test /ready
+        id: smoke
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ secrets.APP_BASE_URL }}/ready" || echo 000)
+            echo "attempt $i: /ready -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "Rolled-back version failed its readiness check." >&2
+          exit 1
+
+      - name: Record deployment outcome
+        if: always() && steps.smoke.outcome != 'skipped'
+        env:
+          STATUS: ${{ steps.smoke.outcome == 'success' && 'rolled_back' || 'failed' }}
+        run: |
+          if [ -z "${{ secrets.DEPLOY_API_TOKEN }}" ]; then
+            echo "DEPLOY_API_TOKEN not set; skipping deployment record." >&2
+            exit 0
+          fi
+          body=$(jq -n \
+            --arg sha "${{ inputs.sha }}" \
+            --arg tag "ghcr.io/${{ steps.owner.outputs.name }}/erp-server:${{ inputs.sha }}" \
+            --arg by "${{ github.actor }}" \
+            --arg status "$STATUS" \
+            --arg reason "${{ inputs.reason }}" \
+            --argjson dur "$(( $(date +%s) - ${STARTED:-$(date +%s)} ))" \
+            '{version: ("rollback-" + $sha[0:7]), imageTag: $tag, commitSha: $sha,
+              environment: "production", status: $status, triggeredBy: $by,
+              triggerType: "manual", durationSeconds: $dur,
+              testSummary: {reason: $reason}}')
+          curl -fsS -X POST "${{ secrets.APP_BASE_URL }}/api/deployments" \
+            -H 'Content-Type: application/json' \
+            -H "X-Deploy-Token: ${{ secrets.DEPLOY_API_TOKEN }}" \
+            -d "$body"
